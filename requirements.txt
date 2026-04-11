@@ -1,0 +1,6 @@
+PySide6
+Pillow
+ebooklib
+beautifulsoup4
+patool
+tqdm
