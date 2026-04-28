@@ -190,6 +190,8 @@ class ConversionArgs:
     threshold: int = 128
     kinsoku_mode: str = "standard"
     output_format: str = "xtc"
+    progress_bar: bool = False
+    progress_bar_side: str = "left"
 
 
 # ==========================================
@@ -905,6 +907,118 @@ def page_image_to_xt_bytes(img, w, h, args):
     return png_to_xth_bytes(img, w, h, args) if _normalize_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else png_to_xtg_bytes(img, w, h, args)
 
 
+def _normalize_progress_bar_side(value):
+    value = str(value or 'left').strip().lower()
+    return value if value in {'left', 'right'} else 'left'
+
+
+def _arg_get(args, key, default=None):
+    return args.get(key, default) if isinstance(args, dict) else getattr(args, key, default)
+
+
+def _arg_bool(args, key, default=False):
+    value = _arg_get(args, key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)
+
+
+def _load_progress_font():
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return None
+
+
+def _text_size(draw, text, font):
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except Exception:
+        return draw.textlength(text, font=font), 8
+
+
+def _chapter_bounds_for_page(page_index, page_count, chapter_starts):
+    starts = set()
+    for value in chapter_starts or []:
+        try:
+            start = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= start < page_count:
+            starts.add(start)
+    starts = sorted(starts)
+    if not starts or starts[0] != 0:
+        starts.insert(0, 0)
+    bounds = starts + [page_count]
+    chapter_start, chapter_end = 0, page_count
+    for idx, start in enumerate(starts):
+        end = bounds[idx + 1]
+        if start <= page_index < end:
+            chapter_start, chapter_end = start, end
+            break
+    return starts, chapter_start, chapter_end
+
+
+def draw_page_progress_bar(img, page_index, page_count, args, chapter_starts=None):
+    """本文ページの端に章区切り付きの読書進捗バーを焼き込む。"""
+    if not _arg_bool(args, 'progress_bar', False) or page_count <= 1:
+        return img
+
+    side = _normalize_progress_bar_side(_arg_get(args, 'progress_bar_side', 'left'))
+    w, h = img.size
+    top = max(1, min(h - 2, int(_arg_get(args, 'margin_t', 0))))
+    bottom = max(top + 1, min(h - 2, h - int(_arg_get(args, 'margin_b', 0)) - 1))
+    height = bottom - top
+    filled_y = max(top, min(bottom, top + int(round(height * (page_index + 1) / page_count))))
+    margin_l = int(_arg_get(args, 'margin_l', 0))
+    margin_r = int(_arg_get(args, 'margin_r', 0))
+    x = max(3, min(w - 4, margin_l // 2)) if side == 'left' else max(3, min(w - 4, w - max(2, margin_r // 2) - 1))
+
+    draw = ImageDraw.Draw(img)
+    output_format = _normalize_output_format(_arg_get(args, 'output_format', 'xtc'))
+    track_fill = 176 if output_format == 'xtch' else 255
+    starts, _chapter_start, chapter_end = _chapter_bounds_for_page(page_index, page_count, chapter_starts)
+    remaining_in_chapter = max(0, chapter_end - page_index - 1)
+
+    if output_format == 'xtch':
+        draw.line((x, top, x, bottom), fill=track_fill, width=3)
+        draw.line((x, top, x, filled_y), fill=0, width=3)
+    else:
+        draw.rectangle((x - 2, top, x + 2, bottom), outline=0, fill=track_fill)
+        draw.rectangle((x - 2, top, x + 2, filled_y), fill=0)
+
+    tick_half = 4
+    for start in starts[1:]:
+        y = max(top, min(bottom, top + int(round(height * start / page_count))))
+        draw.line((x - tick_half, y, x + tick_half, y), fill=0, width=1)
+
+    label = f"{page_index + 1}/{page_count} {remaining_in_chapter} left"
+    label_font = _load_progress_font()
+    label_w, label_h = _text_size(draw, label, label_font)
+    label_y = min(h - int(label_h) - 1, bottom + 2)
+    if label_y <= bottom:
+        label_y = max(top, bottom - int(label_h))
+    label_x = x + 6 if side == 'left' else x - int(label_w) - 6
+    label_x = max(1, min(w - int(label_w) - 1, label_x))
+    draw.text((label_x, label_y), label, fill=0, font=label_font)
+    return img
+
+
+def apply_page_progress_bars(rendered_pages, args, chapter_starts=None):
+    if not _arg_bool(args, 'progress_bar', False):
+        return rendered_pages
+    page_count = len(rendered_pages)
+    result = []
+    for page_index, (page_image, is_illustration) in enumerate(rendered_pages):
+        if is_illustration:
+            result.append((page_image, is_illustration))
+            continue
+        draw_page_progress_bar(page_image, page_index, page_count, args, chapter_starts=chapter_starts)
+        result.append((page_image, is_illustration))
+    return result
+
+
 # ==========================================
 # --- プレビュー生成 ---
 # ==========================================
@@ -1147,6 +1261,8 @@ def generate_preview_base64(args):
                         preview_advance_column(1)
                         if not running:
                             break
+
+            draw_page_progress_bar(res_img, 3, 10, args, chapter_starts=[0, 2, 5, 8])
 
         if mode != 'image' and output_format == 'xtch':
             res_img = apply_xtch_filter(res_img, dither, threshold, w, h)
@@ -1457,6 +1573,7 @@ def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path
         add_page(img)
 
     out_path = Path(output_path) if output_path else Path(source_path).with_suffix('.xtc')
+    rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=[0])
     page_blobs = [page_image_to_xt_bytes(page_image, args.width, args.height, args) for page_image, _ in rendered_pages]
     build_xtc(page_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
     return out_path
@@ -1527,6 +1644,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
     font = ImageFont.truetype(str(font_path), args.font_size)
     ruby_font = ImageFont.truetype(str(font_path), args.ruby_size)
     rendered_pages = []
+    chapter_starts = []
     bold_rules = extract_bold_rules(book)
 
     def add_page(image, is_illustration=False):
@@ -1605,6 +1723,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
             docs.append(it)
 
     for item in tqdm(docs, desc="描画中", unit="章", leave=False):
+        chapter_start = len(rendered_pages)
         current_doc_file_name = getattr(item, 'file_name', '')
         soup = BeautifulSoup(item.get_content(), 'html.parser')
         body = soup.find('body') or soup
@@ -1890,9 +2009,12 @@ def process_epub(epub_path, font_path, args, output_path=None):
         walk_xml(body)
         if has_drawn_on_page:
             add_page(img)
+        if len(rendered_pages) > chapter_start:
+            chapter_starts.append(chapter_start)
 
     ext = '.xtch' if _normalize_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else '.xtc'
     out_path = Path(output_path) if output_path else epub_path.with_suffix(ext)
+    rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=chapter_starts)
     xtg_blobs = []
     for page_image, is_illustration in rendered_pages:
         # イラストページは night_mode を無効にして出力する

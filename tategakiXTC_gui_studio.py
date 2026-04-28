@@ -233,6 +233,8 @@ def _make_preset(n: int, font_size: int = 20, ruby_size: int = 11, line_spacing:
         'dither': False,
         'kinsoku_mode': 'standard',
         'output_format': 'xtc',
+        'progress_bar': False,
+        'progress_bar_side': 'left',
     }
 
 
@@ -254,6 +256,7 @@ PRESET_FIELDS = [
     'font_size', 'ruby_size', 'line_spacing',
     'margin_t', 'margin_b', 'margin_r', 'margin_l',
     'night_mode', 'dither', 'kinsoku_mode', 'output_format',
+    'progress_bar', 'progress_bar_side',
 ]
 
 KINSOKU_MODE_OPTIONS = [
@@ -267,6 +270,11 @@ OUTPUT_FORMAT_OPTIONS = [
     ('xtch', 'XTCH'),
 ]
 OUTPUT_FORMAT_LABELS = {key: label for key, label in OUTPUT_FORMAT_OPTIONS}
+PROGRESS_BAR_SIDE_OPTIONS = [
+    ('left', '左'),
+    ('right', '右'),
+]
+PROGRESS_BAR_SIDE_LABELS = {key: label for key, label in PROGRESS_BAR_SIDE_OPTIONS}
 
 
 @dataclass
@@ -488,6 +496,8 @@ class ConversionWorker(QObject):
             threshold=int(cfg.get('threshold', 128)),
             kinsoku_mode=str(cfg.get('kinsoku_mode', 'standard')),
             output_format=str(cfg.get('output_format', 'xtc')),
+            progress_bar=bool(cfg.get('progress_bar', False)),
+            progress_bar_side=str(cfg.get('progress_bar_side', 'left')),
         )
 
     @staticmethod
@@ -898,6 +908,24 @@ class MainWindow(QMainWindow):
         format_row.addWidget(self.output_format_combo)
         format_row.addStretch(1)
         lay.addLayout(format_row)
+
+        progress_row = QHBoxLayout()
+        self.progress_bar_check = QCheckBox('読書進捗線')
+        self.progress_bar_check.toggled.connect(self.refresh_preview)
+        self.progress_bar_check.toggled.connect(lambda _v, self=self: self.save_ui_state())
+        progress_row.addWidget(self.progress_bar_check)
+        progress_row.addSpacing(12)
+        progress_row.addWidget(self._dim_label('位置'))
+        self.progress_bar_side_combo = QComboBox()
+        for key, label in PROGRESS_BAR_SIDE_OPTIONS:
+            self.progress_bar_side_combo.addItem(label, key)
+        self.progress_bar_side_combo.currentIndexChanged.connect(self.refresh_preview)
+        self.progress_bar_side_combo.currentIndexChanged.connect(lambda _i, self=self: self.save_ui_state())
+        progress_row.addWidget(self.progress_bar_side_combo)
+        progress_row.addSpacing(6)
+        progress_row.addWidget(self._help_icon_button('読書進捗線: 本文ページの端に細い進捗線を焼き込みます。挿絵・画像ページには描画しません。'))
+        progress_row.addStretch(1)
+        lay.addLayout(progress_row)
 
         self._ensure_behavior_controls()
         kinsoku_row = QHBoxLayout()
@@ -2437,6 +2465,8 @@ class MainWindow(QMainWindow):
                 'night_mode': 'true' if self.night_check.isChecked() else 'false',
                 'kinsoku_mode': self.current_kinsoku_mode(),
                 'output_format': self.current_output_format(),
+                'progress_bar': 'true' if self.progress_bar_check.isChecked() else 'false',
+                'progress_bar_side': self.current_progress_bar_side(),
                 'width': self.width_spin.value(),
                 'height': self.height_spin.value(),
             }
@@ -2602,6 +2632,12 @@ class MainWindow(QMainWindow):
         value = str(self.output_format_combo.currentData() or 'xtc').strip().lower()
         return value if value in OUTPUT_FORMAT_LABELS else 'xtc'
 
+    def current_progress_bar_side(self) -> str:
+        if not hasattr(self, 'progress_bar_side_combo'):
+            return 'left'
+        value = str(self.progress_bar_side_combo.currentData() or 'left').strip().lower()
+        return value if value in PROGRESS_BAR_SIDE_LABELS else 'left'
+
     def on_font_changed(self, _value):
         self.save_ui_state()
         self.refresh_preview()
@@ -2672,6 +2708,9 @@ class MainWindow(QMainWindow):
             preset['kinsoku_mode'] = preset_mode if preset_mode in KINSOKU_MODE_LABELS else 'standard'
             preset_fmt = str(preset.get('output_format', 'xtc')).strip().lower()
             preset['output_format'] = preset_fmt if preset_fmt in OUTPUT_FORMAT_LABELS else 'xtc'
+            progress_side = str(preset.get('progress_bar_side', 'left')).strip().lower()
+            preset['progress_bar'] = bool(preset.get('progress_bar', False))
+            preset['progress_bar_side'] = progress_side if progress_side in PROGRESS_BAR_SIDE_LABELS else 'left'
         return presets
 
 
@@ -2686,6 +2725,7 @@ class MainWindow(QMainWindow):
         font_text = Path(str(p.get('font_file') or self._default_font_name())).name
         night_text = 'ON' if bool(p.get('night_mode', False)) else 'OFF'
         dither_text = 'ON' if bool(p.get('dither', False)) else 'OFF'
+        progress_text = PROGRESS_BAR_SIDE_LABELS.get(str(p.get('progress_bar_side', 'left')).strip().lower(), '左') if bool(p.get('progress_bar', False)) else 'OFF'
         profile_text = str(p.get('profile', 'x4')).upper()
         kinsoku_mode = str(p.get('kinsoku_mode', 'standard')).strip().lower()
         if kinsoku_mode not in KINSOKU_MODE_LABELS:
@@ -2700,7 +2740,7 @@ class MainWindow(QMainWindow):
             f"機種: {profile_text}　フォント: {font_text}<br>"
             f"本文: {p['font_size']}　ルビ: {p['ruby_size']}　行間: {p['line_spacing']}<br>"
             f"余白: 上 {p['margin_t']} / 下 {p['margin_b']} / 右 {p['margin_r']} / 左 {p['margin_l']}<br>"
-            f"白黒反転: {night_text}　ディザリング: {dither_text}　禁則: {kinsoku_text}"
+            f"白黒反転: {night_text}　ディザリング: {dither_text}　禁則: {kinsoku_text}　進捗線: {progress_text}"
         )
 
     def _refresh_preset_ui(self):
@@ -2742,6 +2782,8 @@ class MainWindow(QMainWindow):
             'dither': self.dither_check.isChecked(),
             'kinsoku_mode': self.current_kinsoku_mode(),
             'output_format': self.current_output_format(),
+            'progress_bar': self.progress_bar_check.isChecked(),
+            'progress_bar_side': self.current_progress_bar_side(),
         }
 
     def save_preset(self, key: str):
@@ -2788,6 +2830,7 @@ class MainWindow(QMainWindow):
             self.font_size_spin, self.ruby_size_spin, self.line_spacing_spin,
             self.margin_t_spin, self.margin_b_spin, self.margin_r_spin, self.margin_l_spin,
             self.night_check, self.dither_check, self.kinsoku_mode_combo, self.output_format_combo,
+            self.progress_bar_check, self.progress_bar_side_combo,
         ]
         for w in widgets_to_block:
             try:
@@ -2824,6 +2867,11 @@ class MainWindow(QMainWindow):
             fmt_idx = self.output_format_combo.findData(out_fmt if out_fmt in OUTPUT_FORMAT_LABELS else 'xtc')
             if fmt_idx >= 0:
                 self.output_format_combo.setCurrentIndex(fmt_idx)
+            self.progress_bar_check.setChecked(bool(p.get('progress_bar', False)))
+            progress_side = str(p.get('progress_bar_side', 'left')).strip().lower()
+            progress_idx = self.progress_bar_side_combo.findData(progress_side if progress_side in PROGRESS_BAR_SIDE_LABELS else 'left')
+            if progress_idx >= 0:
+                self.progress_bar_side_combo.setCurrentIndex(progress_idx)
 
             if profile_key == 'custom':
                 self.width_spin.setValue(int(p.get('width', self.width_spin.value())))
@@ -2948,6 +2996,8 @@ class MainWindow(QMainWindow):
             'night_mode': self.night_check.isChecked(),
             'kinsoku_mode': self.current_kinsoku_mode(),
             'output_format': self.current_output_format(),
+            'progress_bar': self.progress_bar_check.isChecked(),
+            'progress_bar_side': self.current_progress_bar_side(),
             'open_folder': self.open_folder_check.isChecked(),
             'width': self.width_spin.value(),
             'height': self.height_spin.value(),
@@ -3194,6 +3244,15 @@ class MainWindow(QMainWindow):
         kinsoku_idx = self.kinsoku_mode_combo.findData(saved_kinsoku_mode)
         if kinsoku_idx >= 0:
             self.kinsoku_mode_combo.setCurrentIndex(kinsoku_idx)
+        saved_output_format = str(self.settings_store.value('output_format', 'xtc', type=str)).strip().lower()
+        output_idx = self.output_format_combo.findData(saved_output_format if saved_output_format in OUTPUT_FORMAT_LABELS else 'xtc')
+        if output_idx >= 0:
+            self.output_format_combo.setCurrentIndex(output_idx)
+        self.progress_bar_check.setChecked(self.settings_store.value('progress_bar', False, type=bool))
+        saved_progress_side = str(self.settings_store.value('progress_bar_side', 'left', type=str)).strip().lower()
+        progress_idx = self.progress_bar_side_combo.findData(saved_progress_side if saved_progress_side in PROGRESS_BAR_SIDE_LABELS else 'left')
+        if progress_idx >= 0:
+            self.progress_bar_side_combo.setCurrentIndex(progress_idx)
 
         font_value = self.settings_store.value('font_file', self._default_font_name())
         if font_value:
@@ -3280,6 +3339,8 @@ class MainWindow(QMainWindow):
         self.settings_store.setValue('night_mode', self.night_check.isChecked())
         self.settings_store.setValue('kinsoku_mode', self.current_kinsoku_mode())
         self.settings_store.setValue('output_format', self.current_output_format())
+        self.settings_store.setValue('progress_bar', self.progress_bar_check.isChecked())
+        self.settings_store.setValue('progress_bar_side', self.current_progress_bar_side())
         self.settings_store.setValue('open_folder', self.open_folder_check.isChecked())
         self.settings_store.sync()
 
