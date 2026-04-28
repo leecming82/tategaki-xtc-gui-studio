@@ -4,3 +4,4 @@ ebooklib
 beautifulsoup4
 patool
 tqdm
+lz4

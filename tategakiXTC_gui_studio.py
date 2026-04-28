@@ -1,8 +1,8 @@
 """
-tategakiXTC_gui_studio.py — GUI 本体
+tategakiXTC_gui_studio.py - GUI application
 
-PySide6 ベースの縦書き XTC 変換ツール。
-変換ロジックは tategakiXTC_gui_core.py に分離されています。
+PySide6-based vertical text XTC conversion tool.
+Conversion logic lives in tategakiXTC_gui_core.py.
 """
 
 import base64
@@ -37,14 +37,14 @@ def _collect_missing_runtime_dependencies():
 def _show_startup_dependency_alert(missing_packages):
     install_line = 'pip install ' + ' '.join(missing_packages)
     message = (
-        '次のライブラリが不足しているか、読み込みに失敗しました。\n\n'
+        'The following libraries are missing or failed to load.\n\n'
         + '\n'.join(f'- {name}' for name in missing_packages)
-        + '\n\nインストール例:\n'
+        + '\n\nInstall example:\n'
         + install_line
-        + '\nまたは\n'
+        + '\nor\n'
         + 'pip install -r requirements.txt'
     )
-    title = 'ライブラリ不足'
+    title = 'Missing Libraries'
     if sys.platform.startswith('win'):
         try:
             ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
@@ -97,7 +97,7 @@ from PySide6.QtWidgets import (
 import tategakiXTC_gui_core as core
 from tategakiXTC_gui_core import ConversionArgs
 
-APP_BASE_NAME = '縦書きXTC Studio'
+APP_BASE_NAME = 'Vertical XTC Studio'
 APP_VERSION = '1.0.0'
 APP_NAME = f'{APP_BASE_NAME} {APP_VERSION}'
 SETTINGS_FILE = Path(__file__).with_suffix('.ini')
@@ -115,7 +115,7 @@ SPIN_DOWN_ICON = (UI_ASSETS_DIR / 'spin_down.svg').as_posix()
 SPIN_UP_ICON_DARK = (UI_ASSETS_DIR / 'spin_up_dark.svg').as_posix()
 SPIN_DOWN_ICON_DARK = (UI_ASSETS_DIR / 'spin_down_dark.svg').as_posix()
 
-TEXT_OR_MARKDOWN_LABEL = 'TXT / Markdown（簡易対応）'
+TEXT_OR_MARKDOWN_LABEL = 'TXT / Markdown (basic support)'
 PROCESSOR_BY_SUFFIX = {
     '.epub': core.process_epub,
     '.txt': core.process_text_file,
@@ -129,7 +129,7 @@ PROCESSOR_BY_SUFFIX = {
 # ─────────────────────────────────────────────────────────
 
 class VisibleArrowSpinBox(QSpinBox):
-    """Windows環境でも上下三角が確実に見えるよう、スピンボタン上に矢印を自前描画する。"""
+    """Draw spin arrows manually so they remain visible on Windows."""
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -196,7 +196,7 @@ DEVICE_PROFILES = {
         accent='#5DA9FF', tagline='',
     ),
     'x3': DeviceProfile(
-        # X3 の解像度は 横528 × 縦792 に設定
+        # X3 resolution is set to 528 x 792.
         key='x3', name='Xteink X3', width_px=528, height_px=792, ppi=252.0,
         body_w_mm=64.0, body_h_mm=98.0, screen_w_mm=48.38, screen_h_mm=80.63,
         accent='#9B80FF', tagline='',
@@ -204,20 +204,20 @@ DEVICE_PROFILES = {
     'custom': DeviceProfile(
         key='custom', name='Custom', width_px=480, height_px=800, ppi=220.0,
         body_w_mm=69.0, body_h_mm=114.0, screen_w_mm=55.42, screen_h_mm=92.36,
-        accent='#38C172', tagline='任意サイズで確認',
+        accent='#38C172', tagline='Preview at any size',
     ),
 }
 
 
 # ─────────────────────────────────────────────────────────
-# プリセット定義
+# Preset定義
 # ─────────────────────────────────────────────────────────
 
 def _make_preset(n: int, font_size: int = 20, ruby_size: int = 11, line_spacing: int = 35) -> dict:
-    """プリセット辞書を生成するファクトリ関数。"""
+    """Factory function for preset dictionaries."""
     return {
-        'button_text': f'プリセット{n}',
-        'name': f'プリセット{n}',
+        'button_text': f'Preset{n}',
+        'name': f'Preset{n}',
         'profile': 'x4',
         'width': 480,
         'height': 800,
@@ -260,19 +260,21 @@ PRESET_FIELDS = [
 ]
 
 KINSOKU_MODE_OPTIONS = [
-    ('off', 'オフ'),
-    ('simple', '簡易'),
-    ('standard', '標準'),
+    ('off', 'Off'),
+    ('simple', 'Simple'),
+    ('standard', 'Standard'),
 ]
 KINSOKU_MODE_LABELS = {key: label for key, label in KINSOKU_MODE_OPTIONS}
 OUTPUT_FORMAT_OPTIONS = [
     ('xtc', 'XTC'),
     ('xtch', 'XTCH'),
+    ('xtcz', 'XTCZ'),
+    ('xtchz', 'XTCZ (grayscale)'),
 ]
 OUTPUT_FORMAT_LABELS = {key: label for key, label in OUTPUT_FORMAT_OPTIONS}
 PROGRESS_BAR_SIDE_OPTIONS = [
-    ('left', '左'),
-    ('right', '右'),
+    ('left', 'Left'),
+    ('right', 'Right'),
 ]
 PROGRESS_BAR_SIDE_LABELS = {key: label for key, label in PROGRESS_BAR_SIDE_OPTIONS}
 
@@ -414,7 +416,7 @@ class XtcViewerWidget(QWidget):
             painter.setFont(QFont('Meiryo', 14))
             painter.drawText(
                 page_rect.toRect(), Qt.AlignCenter,
-                'XTCを読み込むと\nここに実機風プレビューを表示します',
+                'Open an XTC/XTCH/XTCZ file\nto show a device-style preview here',
             )
 
         if self.show_guides:
@@ -513,12 +515,12 @@ class ConversionWorker(QObject):
     def _output_path_for_target(self, path: Path, args, requested_name: str, supported_count: int):
         use_custom = bool(requested_name) and supported_count == 1
         if requested_name and not use_custom:
-            self.log.emit('出力名の指定は単一ファイル変換時のみ使用します。今回は自動命名にします。')
+            self.log.emit('Custom output names are used only for single-file conversion. Automatic names will be used this time.')
         if use_custom:
             stem = self._sanitize_output_stem(requested_name)
             if not stem:
-                raise RuntimeError('出力ファイル名が不正です。')
-            ext = '.xtch' if str(getattr(args, 'output_format', 'xtc')).strip().lower() == 'xtch' else '.xtc'
+                raise RuntimeError('Invalid output file name.')
+            ext = core.output_extension(getattr(args, 'output_format', 'xtc'))
             return core.make_unique_output_path(path.parent / f'{stem}{ext}')
         desired = core.get_output_path_for_target(path, getattr(args, 'output_format', 'xtc'))
         if not desired:
@@ -536,19 +538,19 @@ class ConversionWorker(QObject):
         cfg = self.settings_dict
         target_raw = str(cfg.get('target', '')).strip()
         if not target_raw:
-            raise RuntimeError('変換対象ファイルまたはフォルダを指定してください。')
+            raise RuntimeError('Select an input file or folder.')
         tp = Path(target_raw)
         if not tp.exists():
-            raise RuntimeError(f'指定したパスが見つかりません: {tp}')
+            raise RuntimeError(f'Path not found: {tp}')
 
         font_path = core.resolve_font_path(cfg.get('font_file', ''))
         if not font_path or not Path(font_path).exists():
-            raise RuntimeError(f'フォントが見つかりません: {cfg.get("font_file", "") or font_path}')
+            raise RuntimeError(f'Font not found: {cfg.get("font_file", "") or font_path}')
 
         args = self._build_args(cfg)
         supported = self._resolve_supported_targets(tp)
         if not supported:
-            raise RuntimeError(f'変換対象の EPUB / ZIP / RAR / CBZ / CBR / {TEXT_OR_MARKDOWN_LABEL} が見つかりませんでした。')
+            raise RuntimeError(f'No supported EPUB / ZIP / RAR / CBZ / CBR / {TEXT_OR_MARKDOWN_LABEL} input was found.')
 
         requested_name = str(cfg.get('output_name', '')).strip()
         converted, stopped = [], False
@@ -556,18 +558,18 @@ class ConversionWorker(QObject):
         for idx, path in enumerate(supported, 1):
             if self._stop_requested:
                 stopped = True
-                self.log.emit('停止要求を受け付けました。')
+                self.log.emit('Stop request received.')
                 break
-            self.log.emit(f'[{idx}/{total}] 変換中: {path.name}')
+            self.log.emit(f'[{idx}/{total}] Converting: {path.name}')
             out_path = self._output_path_for_target(path, args, requested_name, total)
             if not out_path:
                 continue
             saved = self._process_target(path, font_path, args, out_path)
             converted.append(str(saved))
-            self.log.emit(f'保存: {Path(saved).name}')
+            self.log.emit(f'Save: {Path(saved).name}')
             if self._stop_requested:
                 stopped = True
-                self.log.emit('停止しました。')
+                self.log.emit('Stopped.')
                 break
 
         if cfg.get('open_folder', True):
@@ -580,9 +582,9 @@ class ConversionWorker(QObject):
                 pass
 
         msg = (
-            f'変換を停止しました。({len(converted)} 件を保存)'
+            f'Conversion stopped. ({len(converted)} saved)'
             if stopped
-            else f'変換完了しました。({len(converted)} 件)'
+            else f'Conversion complete.({len(converted)} item(s))'
         )
         self.log.emit(msg)
         return {'message': msg, 'converted_files': converted, 'stopped': stopped}
@@ -617,7 +619,7 @@ class MainWindow(QMainWindow):
         self.worker: Optional[ConversionWorker] = None
         self._startup_pending = True
         self._pending_left_panel_width: Optional[int] = None
-        self._initialized = False  # 初期化完了前の save_ui_state を抑制
+        self._initialized = False  # 初期化DonePreviousの save_ui_state を抑制
 
         self._build_ui()
         QApplication.instance().installEventFilter(self)
@@ -656,13 +658,13 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _setup_global_navigation_shortcuts(self):
-        # 左右キーは eventFilter 側で一元処理する。
-        # 以前は QShortcut と KeyPress の両方で反応し、1回の押下で2ページ送られることがあった。
+        # LeftRightキーは eventFilter 側で一元処理する。
+        # 以Previousは QShortcut と KeyPress の両方で反応し、1回の押下で2Page送られることがあった。
         self.left_arrow_shortcut = None
         self.right_arrow_shortcut = None
 
     def eventFilter(self, obj, event):
-        # 実機ビューのページ送り：左右矢印キー対応
+        # Device PreviewのPage送り：LeftRight矢印キー対応
         if event.type() == QEvent.ShortcutOverride:
             key = event.key()
             if key in (Qt.Key_Left, Qt.Key_Right) and self._can_handle_device_view_arrow_key():
@@ -741,7 +743,7 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self.main_splitter, 1)
         self.main_view_mode = 'font'
-        self.statusBar().showMessage('準備完了')
+        self.statusBar().showMessage('Ready')
 
     # ── トップバー ─────────────────────────────────────────
 
@@ -758,12 +760,12 @@ class MainWindow(QMainWindow):
         lay.addWidget(title)
         lay.addWidget(self._v_sep())
 
-        btn_file = QPushButton('ファイル')
+        btn_file = QPushButton('File')
         btn_file.setObjectName('topBtn')
         btn_file.setFixedWidth(72)
         btn_file.clicked.connect(lambda: self.select_target_path(True))
 
-        btn_folder = QPushButton('フォルダ')
+        btn_folder = QPushButton('Folder')
         btn_folder.setObjectName('topBtn')
         btn_folder.setFixedWidth(72)
         btn_folder.clicked.connect(lambda: self.select_target_path(False))
@@ -773,19 +775,19 @@ class MainWindow(QMainWindow):
 
         self.target_edit = QLineEdit()
         self.target_edit.setObjectName('targetEdit')
-        self.target_edit.setPlaceholderText('EPUB / ZIP / CBZ / CBR / RAR / TXT またはフォルダ')
+        self.target_edit.setPlaceholderText('EPUB / ZIP / CBZ / CBR / RAR / TXT or folder')
         self.target_edit.editingFinished.connect(self._update_top_status)
         self.target_edit.editingFinished.connect(self.refresh_preview)
         lay.addWidget(self.target_edit, 1)
         lay.addWidget(self._v_sep())
 
-        self.run_btn = QPushButton('▶  変換実行')
+        self.run_btn = QPushButton('▶  Convert')
         self.run_btn.setObjectName('runBtn')
         self.run_btn.setFixedWidth(130)
         self.run_btn.clicked.connect(self.start_conversion)
         lay.addWidget(self.run_btn)
 
-        self.stop_btn = QPushButton('■  停止')
+        self.stop_btn = QPushButton('■  Stop')
         self.stop_btn.setObjectName('stopBtn')
         self.stop_btn.setFixedWidth(90)
         self.stop_btn.setEnabled(False)
@@ -797,7 +799,7 @@ class MainWindow(QMainWindow):
         self.panel_btn.setObjectName('iconBtn')
         self.panel_btn.setFocusPolicy(Qt.NoFocus)
         self.panel_btn.setFixedSize(36, 36)
-        self.panel_btn.setToolTip('左パネルの表示/非表示')
+        self.panel_btn.setToolTip('Show/hide left panel')
         self.panel_btn.clicked.connect(self.toggle_left_panel)
         lay.addWidget(self.panel_btn)
 
@@ -805,7 +807,7 @@ class MainWindow(QMainWindow):
         help_btn.setObjectName('iconBtn')
         help_btn.setFocusPolicy(Qt.NoFocus)
         help_btn.setFixedSize(36, 36)
-        help_btn.setToolTip('使い方の流れ')
+        help_btn.setToolTip('Workflow')
         help_btn.clicked.connect(self.show_help_dialog)
         lay.addWidget(help_btn)
 
@@ -813,7 +815,7 @@ class MainWindow(QMainWindow):
         self.settings_btn.setObjectName('iconBtn')
         self.settings_btn.setFocusPolicy(Qt.NoFocus)
         self.settings_btn.setFixedSize(36, 36)
-        self.settings_btn.setToolTip('表示設定')
+        self.settings_btn.setToolTip('Display Settings')
         self.settings_btn.clicked.connect(self.show_display_settings_popup)
         lay.addWidget(self.settings_btn)
 
@@ -827,7 +829,7 @@ class MainWindow(QMainWindow):
         line.setFixedWidth(1)
         return line
 
-    # ── 左設定パネル ──────────────────────────────────────
+    # ── Left設定パネル ──────────────────────────────────────
 
     def _build_left_settings(self):
         self.left_splitter = QSplitter(Qt.Vertical)
@@ -862,10 +864,10 @@ class MainWindow(QMainWindow):
         self.left_splitter.setSizes(self._default_left_splitter_sizes())
         return self.left_splitter
 
-    # ── 設定セクション：フォントと組版 ────────────────────
+    # ── 設定セクション：Font and Layout ────────────────────
 
     def _section_font(self):
-        box = self._make_section('フォントと組版')
+        box = self._make_section('Font and Layout')
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 12, 8, 7)
         lay.setSpacing(6)
@@ -877,7 +879,7 @@ class MainWindow(QMainWindow):
         self._apply_default_font_selection()
         self.font_combo.currentTextChanged.connect(self.on_font_changed)
         font_row.addWidget(self.font_combo, 1)
-        browse_btn = QPushButton('参照')
+        browse_btn = QPushButton('Browse')
         browse_btn.setObjectName('smallBtn')
         browse_btn.clicked.connect(self.select_font_file)
         font_row.addWidget(browse_btn)
@@ -887,9 +889,9 @@ class MainWindow(QMainWindow):
         self.ruby_size_spin = self._spin(8, 32, 12, compact=True, buttons=True)
         self.line_spacing_spin = self._spin(24, 80, 44, compact=True, buttons=True)
         lay.addLayout(self._spin_row([
-            ('本文', self.font_size_spin),
-            ('ルビ', self.ruby_size_spin),
-            ('行間', self.line_spacing_spin),
+            ('Body', self.font_size_spin),
+            ('Ruby', self.ruby_size_spin),
+            ('Line Spacing', self.line_spacing_spin),
         ]))
 
         self.margin_t_spin = self._spin(0, 80, 12, compact=True, buttons=True)
@@ -899,7 +901,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_margin_rows())
 
         format_row = QHBoxLayout()
-        format_row.addWidget(self._dim_label('出力形式'))
+        format_row.addWidget(self._dim_label('Output Format'))
         self.output_format_combo = QComboBox()
         for key, label in OUTPUT_FORMAT_LABELS.items():
             self.output_format_combo.addItem(label, key)
@@ -910,12 +912,12 @@ class MainWindow(QMainWindow):
         lay.addLayout(format_row)
 
         progress_row = QHBoxLayout()
-        self.progress_bar_check = QCheckBox('読書進捗線')
+        self.progress_bar_check = QCheckBox('Reading Progress Bar')
         self.progress_bar_check.toggled.connect(self.refresh_preview)
         self.progress_bar_check.toggled.connect(lambda _v, self=self: self.save_ui_state())
         progress_row.addWidget(self.progress_bar_check)
         progress_row.addSpacing(12)
-        progress_row.addWidget(self._dim_label('位置'))
+        progress_row.addWidget(self._dim_label('Position'))
         self.progress_bar_side_combo = QComboBox()
         for key, label in PROGRESS_BAR_SIDE_OPTIONS:
             self.progress_bar_side_combo.addItem(label, key)
@@ -923,16 +925,16 @@ class MainWindow(QMainWindow):
         self.progress_bar_side_combo.currentIndexChanged.connect(lambda _i, self=self: self.save_ui_state())
         progress_row.addWidget(self.progress_bar_side_combo)
         progress_row.addSpacing(6)
-        progress_row.addWidget(self._help_icon_button('読書進捗線: 本文ページの端に細い進捗線を焼き込みます。挿絵・画像ページには描画しません。'))
+        progress_row.addWidget(self._help_icon_button('Reading progress bar: burns a thin progress bar into text pages. Illustration/image pages are skipped.'))
         progress_row.addStretch(1)
         lay.addLayout(progress_row)
 
         self._ensure_behavior_controls()
         kinsoku_row = QHBoxLayout()
-        kinsoku_row.addWidget(self._dim_label('禁則処理'))
+        kinsoku_row.addWidget(self._dim_label('Line Breaking'))
         kinsoku_row.addWidget(self.kinsoku_mode_combo)
         kinsoku_row.addSpacing(6)
-        kinsoku_row.addWidget(self._help_icon_button('オフ: 禁則処理を行わず機械的に流し込みます。簡易: 行頭禁則・行末禁則・句読点のぶら下げのみ行います。標準: 連続約物や閉じ括弧＋句読点のまとまりも含めて、現在の禁則処理を有効にします。'))
+        kinsoku_row.addWidget(self._help_icon_button('Off: no Japanese line-breaking rules. Simple: line-head/line-end rules plus hanging punctuation. Standard: also keeps continuous punctuation and closing-bracket punctuation groups together.'))
         kinsoku_row.addStretch(1)
         lay.addLayout(kinsoku_row)
 
@@ -951,18 +953,18 @@ class MainWindow(QMainWindow):
         lay.setSpacing(2)
 
         row1 = QHBoxLayout()
-        row1.addWidget(self._dim_label('上余白'))
+        row1.addWidget(self._dim_label('Top Margin'))
         row1.addWidget(self.margin_t_spin)
         row1.addSpacing(16)
-        row1.addWidget(self._dim_label('下余白'))
+        row1.addWidget(self._dim_label('Bottom Margin'))
         row1.addWidget(self.margin_b_spin)
         row1.addStretch(1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(self._dim_label('右余白'))
+        row2.addWidget(self._dim_label('Right Margin'))
         row2.addWidget(self.margin_r_spin)
         row2.addSpacing(16)
-        row2.addWidget(self._dim_label('左余白'))
+        row2.addWidget(self._dim_label('Left Margin'))
         row2.addWidget(self.margin_l_spin)
         row2.addStretch(1)
 
@@ -970,16 +972,16 @@ class MainWindow(QMainWindow):
         lay.addLayout(row2)
         return w
 
-    # ── 設定セクション：表示と実機 ────────────────────────
+    # ── 設定セクション：Display and Device ────────────────────────
 
     def _section_display(self):
-        box = self._make_section('表示と実機')
+        box = self._make_section('Display and Device')
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 14, 8, 8)
         lay.setSpacing(8)
 
         row1 = QHBoxLayout()
-        row1.addWidget(self._dim_label('機種'))
+        row1.addWidget(self._dim_label('Device'))
         self.profile_combo = QComboBox()
         self.profile_combo.addItem('Xteink X4', 'x4')
         self.profile_combo.addItem('Xteink X3', 'x3')
@@ -988,21 +990,21 @@ class MainWindow(QMainWindow):
         self.profile_combo.currentIndexChanged.connect(self.on_profile_changed)
         row1.addWidget(self.profile_combo)
         row1.addSpacing(16)
-        self.night_check = QCheckBox('白黒反転')
+        self.night_check = QCheckBox('Invert')
         self.night_check.toggled.connect(self.refresh_preview)
         row1.addWidget(self.night_check)
         row1.addStretch(1)
         lay.addLayout(row1)
 
         row2 = QHBoxLayout()
-        self.actual_size_check = QCheckBox('実寸近似')
+        self.actual_size_check = QCheckBox('Approx. Actual Size')
         self.actual_size_check.toggled.connect(self.on_actual_size_toggled)
-        self.guides_check = QCheckBox('ガイド')
+        self.guides_check = QCheckBox('Guides')
         self.guides_check.setChecked(True)
         row2.addWidget(self.actual_size_check)
         row2.addWidget(self.guides_check)
         row2.addSpacing(16)
-        row2.addWidget(self._dim_label('実寸補正'))
+        row2.addWidget(self._dim_label('Size Calibration'))
         self.calib_down_btn = QPushButton('−')
         self.calib_down_btn.setObjectName('stepBtn')
         self.calib_down_btn.setFixedSize(24, 24)
@@ -1022,7 +1024,7 @@ class MainWindow(QMainWindow):
         self.calib_up_btn.setFixedSize(24, 24)
         row2.addWidget(self.calib_up_btn)
         row2.addSpacing(6)
-        row2.addWidget(self._help_icon_button('実寸補正: 実機の見え方に合わせて全体の大きさを微調整します。白黒反転: 白と黒を入れ替えて見え方を確認します。変換時は出力ファイルにも反映されます。'))
+        row2.addWidget(self._help_icon_button('Size calibration: fine-tune the preview scale to match the physical device. Invert swaps black and white and is also applied to output files.'))
         row2.addStretch(1)
         lay.addLayout(row2)
 
@@ -1033,14 +1035,14 @@ class MainWindow(QMainWindow):
         self.custom_size_row.setVisible(False)
         cs_lay = QHBoxLayout(self.custom_size_row)
         cs_lay.setContentsMargins(0, 0, 0, 0)
-        cs_lay.addWidget(self._dim_label('幅'))
+        cs_lay.addWidget(self._dim_label('Width'))
         cs_lay.addWidget(self.width_spin)
         cs_lay.addSpacing(8)
-        cs_lay.addWidget(self._dim_label('高さ'))
+        cs_lay.addWidget(self._dim_label('Height'))
         cs_lay.addWidget(self.height_spin)
         row3.addWidget(self.custom_size_row)
         row3.addStretch(1)
-        self.open_xtc_btn = QPushButton('XTC/XTCHを開く')
+        self.open_xtc_btn = QPushButton('Open XTC/XTCH/XTCZ')
         self.open_xtc_btn.setObjectName('smallBtn')
         self.open_xtc_btn.clicked.connect(self.open_xtc_file)
         row3.addWidget(self.open_xtc_btn)
@@ -1058,35 +1060,35 @@ class MainWindow(QMainWindow):
         self.height_spin.valueChanged.connect(self.refresh_preview)
         return box
 
-    # ── 設定セクション：画像処理 ──────────────────────────
+    # ── 設定セクション：Image Processing ──────────────────────────
 
     def _section_image(self):
-        box = self._make_section('画像処理')
+        box = self._make_section('Image Processing')
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 12, 8, 7)
         lay.setSpacing(5)
 
         row = QHBoxLayout()
-        self.dither_check = QCheckBox('ディザリング')
+        self.dither_check = QCheckBox('Dithering')
         self.dither_check.setChecked(False)
         self.dither_check.toggled.connect(self.on_dither_toggled)
         row.addWidget(self.dither_check)
         row.addSpacing(16)
-        row.addWidget(self._dim_label('しきい値'))
+        row.addWidget(self._dim_label('Threshold'))
         self.threshold_spin = self._spin(0, 255, 128, compact=True)
         self.threshold_spin.setEnabled(False)
         self.threshold_spin.valueChanged.connect(self.refresh_preview)
         row.addWidget(self.threshold_spin)
         row.addSpacing(6)
-        row.addWidget(self._help_icon_button('しきい値: 白と黒の分かれ目を調整します。ディザリング: 粒状感と引き換えに濃淡感を残します。'))
+        row.addWidget(self._help_icon_button('Threshold: controls the split between black and white. Dithering preserves tonal detail with a grainier look.'))
         row.addStretch(1)
         lay.addLayout(row)
         return box
 
-    # ── 設定セクション：プリセット ────────────────────────
+    # ── 設定セクション：Preset ────────────────────────
 
     def _section_preset(self):
-        box = self._make_section('プリセット')
+        box = self._make_section('Preset')
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 14, 8, 8)
         lay.setSpacing(6)
@@ -1098,14 +1100,14 @@ class MainWindow(QMainWindow):
         self.preset_combo.currentIndexChanged.connect(self.on_preset_selection_changed)
         row.addWidget(self.preset_combo, 1)
 
-        apply_btn = QPushButton('適用')
+        apply_btn = QPushButton('Apply')
         apply_btn.setObjectName('smallBtn')
         apply_btn.clicked.connect(self.apply_selected_preset)
         row.addWidget(apply_btn)
 
-        save_btn = QPushButton('保存')
+        save_btn = QPushButton('Save')
         save_btn.setObjectName('smallBtn')
-        save_btn.setToolTip('現在の設定をこのプリセットへ上書き保存')
+        save_btn.setToolTip('Overwrite this preset with the current settings')
         save_btn.clicked.connect(self.save_selected_preset)
         row.addWidget(save_btn)
         lay.addLayout(row)
@@ -1119,7 +1121,7 @@ class MainWindow(QMainWindow):
     def _ensure_behavior_controls(self):
         if hasattr(self, 'open_folder_check'):
             return
-        self.open_folder_check = QCheckBox('完了後フォルダを開く')
+        self.open_folder_check = QCheckBox('Open folder when finished')
         self.open_folder_check.setChecked(True)
         self.open_folder_check.toggled.connect(self.save_ui_state)
 
@@ -1128,10 +1130,10 @@ class MainWindow(QMainWindow):
             self.kinsoku_mode_combo.addItem(label, key)
         self.kinsoku_mode_combo.currentIndexChanged.connect(self._on_kinsoku_mode_changed)
 
-    # ── 設定セクション：その他オプション ────────────────────────
+    # ── 設定セクション：Other Options ────────────────────────
 
     def _section_behavior(self):
-        box = self._make_section('その他オプション')
+        box = self._make_section('Other Options')
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 14, 8, 8)
         lay.setSpacing(6)
@@ -1144,7 +1146,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(row1)
         return box
 
-    # ── 右プレビューパネル ────────────────────────────────
+    # ── Rightプレビューパネル ────────────────────────────────
 
     def _build_right_preview(self):
         panel = QWidget()
@@ -1205,14 +1207,14 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(6)
 
-        self.font_view_btn = QPushButton('フォントビュー')
+        self.font_view_btn = QPushButton('Font Preview')
         self.font_view_btn.setObjectName('viewToggleBtn')
         self.font_view_btn.setCheckable(True)
         self.font_view_btn.setChecked(True)
         self.font_view_btn.setFocusPolicy(Qt.NoFocus)
         self.font_view_btn.clicked.connect(lambda: self.set_main_view_mode('font'))
 
-        self.device_view_btn = QPushButton('実機ビュー')
+        self.device_view_btn = QPushButton('Device Preview')
         self.device_view_btn.setObjectName('viewToggleBtn')
         self.device_view_btn.setCheckable(True)
         self.device_view_btn.setFocusPolicy(Qt.NoFocus)
@@ -1222,7 +1224,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.device_view_btn)
         lay.addStretch(1)
 
-        self.view_help_btn = self._help_icon_button('フォントビュー: 文字サイズ・余白・ルビの見え方を調整するときに使います。')
+        self.view_help_btn = self._help_icon_button('Font Preview: tune text size, margins, and ruby appearance.')
         lay.addWidget(self.view_help_btn)
         return bar
 
@@ -1234,23 +1236,23 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(8)
 
-        self.current_xtc_label = QLabel('表示中: なし')
+        self.current_xtc_label = QLabel('Showing: none')
         self.current_xtc_label.setObjectName('hintLabel')
         lay.addWidget(self.current_xtc_label, 1)
 
-        self.nav_reverse_check = QCheckBox('反転')
+        self.nav_reverse_check = QCheckBox('Reverse')
         self.nav_reverse_check.setObjectName('navToggle')
         self.nav_reverse_check.setFocusPolicy(Qt.NoFocus)
         self.nav_reverse_check.toggled.connect(self.on_nav_reverse_toggled)
         lay.addWidget(self.nav_reverse_check)
 
-        self.prev_btn = QPushButton('前')
+        self.prev_btn = QPushButton('Previous')
         self.prev_btn.setObjectName('navBtn')
         self.prev_btn.setFocusPolicy(Qt.NoFocus)
         self.prev_btn.clicked.connect(lambda: self.on_nav_button_clicked(-1))
         lay.addWidget(self.prev_btn)
 
-        lay.addWidget(self._dim_label('ページ'))
+        lay.addWidget(self._dim_label('Page'))
         self.page_input = QSpinBox()
         self.page_input.setRange(0, 0)
         self.page_input.setButtonSymbols(QSpinBox.NoButtons)
@@ -1263,7 +1265,7 @@ class MainWindow(QMainWindow):
         self.page_total_label.setObjectName('hintLabel')
         lay.addWidget(self.page_total_label)
 
-        self.next_btn = QPushButton('次')
+        self.next_btn = QPushButton('Next')
         self.next_btn.setObjectName('navBtn')
         self.next_btn.setFocusPolicy(Qt.NoFocus)
         self.next_btn.clicked.connect(lambda: self.on_nav_button_clicked(1))
@@ -1272,7 +1274,7 @@ class MainWindow(QMainWindow):
         self._update_nav_button_texts()
         return bar
 
-    # ── 下部パネル（ステータス + 結果/ログ）────────────────
+    # ── 下部パネル（ステータス + 結果/Log）────────────────
 
     def _build_bottom_panel(self):
         panel = QFrame()
@@ -1288,7 +1290,7 @@ class MainWindow(QMainWindow):
         sl.setContentsMargins(14, 0, 14, 0)
         sl.setSpacing(10)
 
-        self.busy_badge = QLabel('待機中')
+        self.busy_badge = QLabel('Idle')
         self.busy_badge.setObjectName('badge')
         sl.addWidget(self.busy_badge)
 
@@ -1300,7 +1302,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximumWidth(200)
         sl.addWidget(self.progress_bar)
 
-        self.progress_label = QLabel('変換を開始すると進行状況を表示します。')
+        self.progress_label = QLabel('Conversion progress will appear here.')
         self.progress_label.setObjectName('hintLabel')
         sl.addWidget(self.progress_label, 1)
 
@@ -1312,8 +1314,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(sep)
 
         self.bottom_tabs = QTabWidget()
-        self.bottom_tabs.addTab(self._build_results_tab(), '変換結果')
-        self.bottom_tabs.addTab(self._build_log_tab(), 'ログ')
+        self.bottom_tabs.addTab(self._build_results_tab(), 'Results')
+        self.bottom_tabs.addTab(self._build_log_tab(), 'Log')
         lay.addWidget(self.bottom_tabs, 1)
         return panel
 
@@ -1376,7 +1378,7 @@ class MainWindow(QMainWindow):
         if not text:
             return
         msg = QMessageBox(self)
-        msg.setWindowTitle('説明')
+        msg.setWindowTitle('Help')
         msg.setIcon(QMessageBox.Information)
         msg.setText(text)
         msg.setStandardButtons(QMessageBox.Ok)
@@ -1393,10 +1395,10 @@ class MainWindow(QMainWindow):
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(6)
-        title = QLabel('使い方')
+        title = QLabel('Help')
         title.setObjectName('flowGuideTitle')
         title_row.addWidget(title)
-        title_row.addWidget(self._help_icon_button('1. ファイルを開く → 2. プリセットを選ぶ → 3. 必要なら微調整 → 4. 変換実行 → 5. 実機ビューで確認'))
+        title_row.addWidget(self._help_icon_button('1. Open a file -> 2. Choose a preset -> 3. Fine-tune if needed -> 4. Convert -> 5. Check Device Preview'))
         title_row.addStretch(1)
         lay.addLayout(title_row)
         return box
@@ -1448,7 +1450,7 @@ class MainWindow(QMainWindow):
 
     def _light_stylesheet(self) -> str:
         stylesheet = """
-        /* ── ベース ── */
+        /* Base */
         QMainWindow, QWidget {
             background: #F4F7FB;
             color: #243648;
@@ -1456,7 +1458,7 @@ class MainWindow(QMainWindow):
             font-size: 15px;
         }
 
-        /* ── トップバー ── */
+        /* Top Bar */
         QFrame#topBar {
             background: #FFFFFF;
             border: none;
@@ -1527,7 +1529,7 @@ class MainWindow(QMainWindow):
         }
         QPushButton#iconBtn:hover { background: #EEF5FC; color: #3E607F; }
 
-        /* ── 設定パネル ── */
+        /* Settings Panel */
         QScrollBar:vertical {
             background: #E9EFF5;
             width: 10px;
@@ -1573,7 +1575,7 @@ class MainWindow(QMainWindow):
         QPushButton#miniHelpBtn:hover { background: #DCECF9; border-color: #6F96BB; }
         QPushButton#miniHelpBtn:pressed { background: #CFE3F4; }
 
-        /* ── 左ペインの密度調整 ── */
+        /* Left Pane Density */
         QWidget#leftSettingsContainer QGroupBox#settingsSection {
             border-radius: 9px;
             padding-top: 12px;
@@ -1734,7 +1736,7 @@ class MainWindow(QMainWindow):
         }
         QLineEdit:focus { border-color: #77AEEB; }
 
-        /* ── プレビューパネル ── */
+        /* Preview Panel */
         QFrame#viewToggleBar {
             background: #F5F8FC;
             border: none;
@@ -1755,7 +1757,7 @@ class MainWindow(QMainWindow):
             font-weight: 700;
         }
 
-        /* ── ナビゲーションバー ── */
+        /* Navigation Bar */
         QFrame#navBar {
             background: #F5F8FC;
             border: none;
@@ -1789,7 +1791,7 @@ class MainWindow(QMainWindow):
             border: 1px solid #4C8FE3;
         }
 
-        /* ── 下部パネル ── */
+        /* Bottom Panel */
         QFrame#bottomPanel { background: #F6F9FC; border: none; }
         QFrame#bottomPanel QTabBar::tab { min-height: 24px; padding: 4px 10px; }
         QFrame#statusStrip { background: #FAFCFE; border: none; }
@@ -1855,7 +1857,7 @@ class MainWindow(QMainWindow):
             padding: 6px;
         }
 
-        /* ── スプリッタ ── */
+        /* Splitter */
         QSplitter::handle { background: #DCE5EE; }
         QSplitter::handle:horizontal {
             width: 6px;
@@ -1866,7 +1868,7 @@ class MainWindow(QMainWindow):
             margin: 2px 0;
         }
 
-        /* ── ポップアップメニュー ── */
+        /* Popup Menu */
         QMenu#gearPopupMenu {
             background: #FFFFFF;
             color: #24415C;
@@ -1883,7 +1885,7 @@ class MainWindow(QMainWindow):
         QMenu#gearPopupMenu::indicator { width: 14px; height: 14px; }
         QMenu#gearPopupMenu::separator { height: 1px; background: #D7E1EA; margin: 6px 4px; }
 
-        /* ── ステータスバー ── */
+        /* Status Bar */
         QStatusBar { background: #F6F9FC; color: #5F7992; font-size: 13px; }
         """
         return (stylesheet
@@ -1892,7 +1894,7 @@ class MainWindow(QMainWindow):
 
     def _dark_stylesheet(self) -> str:
         stylesheet = """
-        /* ── ベース ── */
+        /* Base */
         QMainWindow, QWidget {
             background: #0D1520;
             color: #D8EAF8;
@@ -1900,7 +1902,7 @@ class MainWindow(QMainWindow):
             font-size: 15px;
         }
 
-        /* ── トップバー ── */
+        /* Top Bar */
         QFrame#topBar {
             background: #111F2E;
             border: none;
@@ -1971,7 +1973,7 @@ class MainWindow(QMainWindow):
         }
         QPushButton#iconBtn:hover { background: #1E3850; color: #C8E4F8; }
 
-        /* ── 設定パネル ── */
+        /* Settings Panel */
         QScrollBar:vertical {
             background: #0A1520;
             width: 10px;
@@ -2017,7 +2019,7 @@ class MainWindow(QMainWindow):
         QPushButton#miniHelpBtn:hover { background: #28455C; border-color: #7D9BB7; }
         QPushButton#miniHelpBtn:pressed { background: #31526D; }
 
-        /* ── 左ペインの密度調整 ── */
+        /* Left Pane Density */
         QWidget#leftSettingsContainer QGroupBox#settingsSection {
             border-radius: 9px;
             padding-top: 12px;
@@ -2178,7 +2180,7 @@ class MainWindow(QMainWindow):
         }
         QLineEdit:focus { border-color: #3A6A9A; }
 
-        /* ── プレビューパネル ── */
+        /* Preview Panel */
         QFrame#viewToggleBar {
             background: #0F1C28;
             border: none;
@@ -2199,7 +2201,7 @@ class MainWindow(QMainWindow):
             font-weight: 700;
         }
 
-        /* ── ナビゲーションバー ── */
+        /* Navigation Bar */
         QFrame#navBar {
             background: #0F1C28;
             border: none;
@@ -2233,7 +2235,7 @@ class MainWindow(QMainWindow):
             border: 1px solid #3A80DD;
         }
 
-        /* ── 下部パネル ── */
+        /* Bottom Panel */
         QFrame#bottomPanel { background: #0D1824; border: none; }
         QFrame#bottomPanel QTabBar::tab { min-height: 24px; padding: 4px 10px; }
         QFrame#statusStrip { background: #0F1C28; border: none; }
@@ -2299,7 +2301,7 @@ class MainWindow(QMainWindow):
             padding: 6px;
         }
 
-        /* ── スプリッタ ── */
+        /* Splitter */
         QSplitter::handle { background: #1A2D3F; }
         QSplitter::handle:horizontal {
             width: 6px;
@@ -2311,7 +2313,7 @@ class MainWindow(QMainWindow):
         }
         QSplitter::handle:hover { background: #2A4560; }
 
-        /* ── ポップアップメニュー ── */
+        /* Popup Menu */
         QMenu#gearPopupMenu {
             background: #10202F;
             color: #D7E7F5;
@@ -2328,7 +2330,7 @@ class MainWindow(QMainWindow):
         QMenu#gearPopupMenu::indicator { width: 14px; height: 14px; }
         QMenu#gearPopupMenu::separator { height: 1px; background: #29445C; margin: 6px 4px; }
 
-        /* ── ステータスバー ── */
+        /* Status Bar */
         QStatusBar { background: #0D1824; color: #6E92AD; font-size: 13px; }
         """
         return (stylesheet
@@ -2343,7 +2345,7 @@ class MainWindow(QMainWindow):
         self.preview_stack.setCurrentIndex(0 if is_font else 1)
         self.font_view_btn.setChecked(is_font)
         self.device_view_btn.setChecked(not is_font)
-        view_tip = 'フォントビュー: 文字サイズ・余白・ルビの見え方を調整するときに使います。' if is_font else '実機ビュー: 変換後のXTCをページ送りしながら実機に近い形で確認します。'
+        view_tip = 'Font Preview: tune text size, margins, and ruby appearance.' if is_font else 'Device Preview: page through the converted file in a device-like view.'
         self.view_help_btn.setToolTip(view_tip)
         self.view_help_btn.setProperty('helpText', view_tip)
         self.update_navigation_ui()
@@ -2351,7 +2353,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self.viewer_widget.setFocus(Qt.OtherFocusReason))
         if not initial:
             self.statusBar().showMessage(
-                'フォントビューに切り替えました。' if is_font else '実機ビューに切り替えました。', 2000
+                'Switched to Font Preview.' if is_font else 'Switched to Device Preview.', 2000
             )
 
     def toggle_left_panel(self):
@@ -2360,7 +2362,7 @@ class MainWindow(QMainWindow):
         if vis:
             self._apply_left_panel_width(430)
         self.statusBar().showMessage(
-            '設定パネルを表示しました。' if vis else '設定パネルを非表示にしました。', 2000
+            'Settings panel shown.' if vis else 'Settings panel hidden.', 2000
         )
 
     def set_ui_theme(self, theme: str, persist: bool = True):
@@ -2378,7 +2380,7 @@ class MainWindow(QMainWindow):
             self.settings_store.setValue('ui_theme', normalized)
             self.settings_store.sync()
             self.statusBar().showMessage(
-                '外観をダークに切り替えました。' if normalized == 'dark' else '外観を白基調に切り替えました。',
+                'Switched to dark theme.' if normalized == 'dark' else 'Switched to light theme.',
                 2000,
             )
 
@@ -2388,7 +2390,7 @@ class MainWindow(QMainWindow):
             self.panel_btn.setVisible(self.panel_button_visible)
         if persist:
             self.statusBar().showMessage(
-                '三本線ボタンを表示しました。' if self.panel_button_visible else '三本線ボタンを非表示にしました。',
+                'Menu button shown.' if self.panel_button_visible else 'Menu button hidden.',
                 2000,
             )
 
@@ -2396,27 +2398,27 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.setObjectName('gearPopupMenu')
         menu.setToolTipsVisible(True)
-        menu.addSection('外観')
+        menu.addSection('Appearance')
 
         theme_group = QActionGroup(menu)
         theme_group.setExclusive(True)
 
-        light_action = menu.addAction('白基調')
+        light_action = menu.addAction('Light')
         light_action.setCheckable(True)
         light_action.setChecked(self.current_ui_theme != 'dark')
         light_action.triggered.connect(lambda checked: checked and self.set_ui_theme('light'))
         theme_group.addAction(light_action)
 
-        dark_action = menu.addAction('ダーク')
+        dark_action = menu.addAction('Dark')
         dark_action.setCheckable(True)
         dark_action.setChecked(self.current_ui_theme == 'dark')
         dark_action.triggered.connect(lambda checked: checked and self.set_ui_theme('dark'))
         theme_group.addAction(dark_action)
 
         menu.addSeparator()
-        menu.addSection('その他オプション')
+        menu.addSection('Other Options')
 
-        open_folder_action = menu.addAction('完了後フォルダを開く')
+        open_folder_action = menu.addAction('Open folder when finished')
         open_folder_action.setCheckable(True)
         open_folder_action.setChecked(self.open_folder_check.isChecked())
         open_folder_action.toggled.connect(lambda checked: self.open_folder_check.setChecked(bool(checked)))
@@ -2435,7 +2437,7 @@ class MainWindow(QMainWindow):
         menu.exec(QPoint(x, y))
 
     def _apply_left_panel_width(self, width: int):
-        """main_splitter の左パネル幅を確実にセットする。"""
+        """Set the main splitter left panel width reliably."""
         total = self.main_splitter.width()
         if total <= 0:
             QTimer.singleShot(50, lambda: self._apply_left_panel_width(width))
@@ -2472,7 +2474,7 @@ class MainWindow(QMainWindow):
             }
             img_b64 = core.generate_preview_base64(data)
             if not img_b64:
-                self.preview_label.setText('プレビューを生成できませんでした')
+                self.preview_label.setText('Could not generate preview.')
                 return
             raw = base64.b64decode(img_b64)
             pix = QPixmap.fromImage(QImage.fromData(raw, 'PNG'))
@@ -2486,7 +2488,7 @@ class MainWindow(QMainWindow):
             self.preview_label.setText('')
             self._update_top_status()
         except Exception as exc:
-            self.preview_label.setText(f'プレビュー生成エラー\n{exc}')
+            self.preview_label.setText(f'Preview generation error\n{exc}')
 
     def _font_preview_target_size(self) -> QSize:
         profile = DEVICE_PROFILES[self.current_profile_key]
@@ -2528,11 +2530,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'prev_btn') or not hasattr(self, 'next_btn'):
             return
         if self.nav_buttons_reversed:
-            self.prev_btn.setText('次')
-            self.next_btn.setText('前')
+            self.prev_btn.setText('Next')
+            self.next_btn.setText('Previous')
         else:
-            self.prev_btn.setText('前')
-            self.next_btn.setText('次')
+            self.prev_btn.setText('Previous')
+            self.next_btn.setText('Next')
 
     def on_nav_reverse_toggled(self, checked):
         self.nav_buttons_reversed = bool(checked)
@@ -2580,7 +2582,7 @@ class MainWindow(QMainWindow):
             self.current_page_index = new_idx
             self.render_current_page()
 
-    # ── プロファイル・設定変更ハンドラ ─────────────────────
+    # ── プロFile・設定変更ハンドラ ─────────────────────
 
     def on_profile_changed(self):
         key = self.profile_combo.currentData() or 'x4'
@@ -2642,14 +2644,14 @@ class MainWindow(QMainWindow):
         self.save_ui_state()
         self.refresh_preview()
 
-    # ── プリセット ─────────────────────────────────────────
+    # ── Preset ─────────────────────────────────────────
 
     def on_preset_selection_changed(self):
         self._refresh_preset_ui()
         key = self.selected_preset_key()
         p = self.preset_definitions.get(key) if key else None
         if p:
-            self.statusBar().showMessage(f"{p['button_text']} の詳細表示を更新しました。適用する場合は［適用］を押してください。", 2500)
+            self.statusBar().showMessage(f"{p['button_text']} details updated. Press Apply to use it.", 2500)
         self.save_ui_state()
 
     def selected_preset_key(self) -> Optional[str]:
@@ -2664,8 +2666,8 @@ class MainWindow(QMainWindow):
             if data:
                 return str(data)
             text = self.preset_combo.itemText(idx).strip()
-            if text.startswith('プリセット'):
-                suffix = text.replace('プリセット', '').strip()
+            if text.startswith('Preset'):
+                suffix = text.replace('Preset', '').strip()
                 if suffix.isdigit():
                     return f'preset_{suffix}'
         return None
@@ -2719,28 +2721,28 @@ class MainWindow(QMainWindow):
         name = str(p.get('name') or '').strip()
         if button_text and name:
             return button_text if button_text == name else f"{button_text} / {name}"
-        return button_text or name or 'プリセット'
+        return button_text or name or 'Preset'
 
     def _preset_summary_text(self, p: dict) -> str:
         font_text = Path(str(p.get('font_file') or self._default_font_name())).name
         night_text = 'ON' if bool(p.get('night_mode', False)) else 'OFF'
         dither_text = 'ON' if bool(p.get('dither', False)) else 'OFF'
-        progress_text = PROGRESS_BAR_SIDE_LABELS.get(str(p.get('progress_bar_side', 'left')).strip().lower(), '左') if bool(p.get('progress_bar', False)) else 'OFF'
+        progress_text = PROGRESS_BAR_SIDE_LABELS.get(str(p.get('progress_bar_side', 'left')).strip().lower(), 'Left') if bool(p.get('progress_bar', False)) else 'OFF'
         profile_text = str(p.get('profile', 'x4')).upper()
         kinsoku_mode = str(p.get('kinsoku_mode', 'standard')).strip().lower()
         if kinsoku_mode not in KINSOKU_MODE_LABELS:
             kinsoku_mode = 'standard'
-        kinsoku_text = KINSOKU_MODE_LABELS.get(kinsoku_mode, '標準')
+        kinsoku_text = KINSOKU_MODE_LABELS.get(kinsoku_mode, 'Standard')
         out_fmt = str(p.get('output_format', 'xtc')).strip().lower()
         if out_fmt not in OUTPUT_FORMAT_LABELS:
             out_fmt = 'xtc'
         preset_name = self._preset_display_name(p)
         return (
             f"{preset_name}<br>"
-            f"機種: {profile_text}　フォント: {font_text}<br>"
-            f"本文: {p['font_size']}　ルビ: {p['ruby_size']}　行間: {p['line_spacing']}<br>"
-            f"余白: 上 {p['margin_t']} / 下 {p['margin_b']} / 右 {p['margin_r']} / 左 {p['margin_l']}<br>"
-            f"白黒反転: {night_text}　ディザリング: {dither_text}　禁則: {kinsoku_text}　進捗線: {progress_text}"
+            f"Device: {profile_text}  Font: {font_text}<br>"
+            f"Body: {p['font_size']}  Ruby: {p['ruby_size']}  Line Spacing: {p['line_spacing']}<br>"
+            f"Margins: top {p['margin_t']} / bottom {p['margin_b']} / right {p['margin_r']} / left {p['margin_l']}<br>"
+            f"Invert: {night_text}  Dithering: {dither_text}  Line rules: {kinsoku_text}  Progress bar: {progress_text}"
         )
 
     def _refresh_preset_ui(self):
@@ -2793,8 +2795,8 @@ class MainWindow(QMainWindow):
         payload = self.current_preset_payload()
         summary = self._preset_summary_text({**p, **payload})
         ans = QMessageBox.question(
-            self, 'プリセット保存',
-            f"現在の設定を {self._preset_display_name(p)} へ保存しますか？\n\n{summary}",
+            self, 'Save Preset',
+            f"Save current settings to {self._preset_display_name(p)}?\n\n{summary}",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
         )
         if ans != QMessageBox.Yes:
@@ -2807,17 +2809,17 @@ class MainWindow(QMainWindow):
             self.settings_store.setValue(f'{prefix}/{field}', value)
         self.settings_store.sync()
         self._refresh_preset_ui()
-        self.statusBar().showMessage(f"{self._preset_display_name(p)} を保存しました", 4000)
+        self.statusBar().showMessage(f"{self._preset_display_name(p)} saved.", 4000)
 
     def apply_preset(self, key: str):
         p = self.preset_definitions.get(key)
         if not p:
-            self.statusBar().showMessage('適用するプリセットが見つかりませんでした。', 3000)
+            self.statusBar().showMessage('Preset not found.', 3000)
             return
         idx = self.preset_combo.findData(key)
         if idx < 0 and key.startswith('preset_'):
             try:
-                idx = self.preset_combo.findText(f"プリセット{int(key.split('_')[-1])}")
+                idx = self.preset_combo.findText(f"Preset{int(key.split('_')[-1])}")
             except Exception:
                 idx = -1
         if idx >= 0 and self.preset_combo.currentIndex() != idx:
@@ -2892,19 +2894,19 @@ class MainWindow(QMainWindow):
         self._refresh_preset_ui()
         self.save_ui_state()
         self.refresh_preview()
-        self.statusBar().showMessage(f"{self._preset_display_name(p)} を適用しました。", 3000)
+        self.statusBar().showMessage(f"{self._preset_display_name(p)} applied.", 3000)
 
-    # ── ファイル選択 ───────────────────────────────────────
+    # ── File選択 ───────────────────────────────────────
 
     def select_target_path(self, as_file: bool):
         current = self.target_edit.text().strip() or str(Path.home())
         if as_file:
             path, _ = QFileDialog.getOpenFileName(
-                self, '変換対象を選択', current,
+                self, 'Select Input', current,
                 'Supported (*.epub *.zip *.rar *.cbz *.cbr *.txt *.md *.markdown);;All Files (*.*)',
             )
         else:
-            path = QFileDialog.getExistingDirectory(self, '変換対象フォルダを選択', current)
+            path = QFileDialog.getExistingDirectory(self, 'Select Input Folder', current)
         if path:
             self.target_edit.setText(path)
             self._update_top_status()
@@ -2913,7 +2915,7 @@ class MainWindow(QMainWindow):
 
     def select_font_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, 'フォントファイルを選択', str(Path.home()),
+            self, 'Select Font File', str(Path.home()),
             'Fonts (*.ttf *.ttc *.otf);;All Files (*.*)',
         )
         if path:
@@ -2969,13 +2971,13 @@ class MainWindow(QMainWindow):
     def _update_top_status(self):
         target = self.target_edit.text().strip()
         if not target:
-            self.statusBar().showMessage('変換対象を選択してください。')
+            self.statusBar().showMessage('Select an input first.')
             return
         p = Path(target)
-        kind = 'フォルダ' if p.is_dir() else 'ファイル'
+        kind = 'Folder' if p.is_dir() else 'File'
         msg = f'{kind}: {p.name}'
         profile = DEVICE_PROFILES[self.current_profile_key]
-        msg += f'  |  {profile.name} / 本文{self.font_size_spin.value()} / 行間{self.line_spacing_spin.value()}'
+        msg += f'  |  {profile.name} / Body{self.font_size_spin.value()} / Line Spacing{self.line_spacing_spin.value()}'
         self.statusBar().showMessage(msg)
 
     # ── 変換 ──────────────────────────────────────────────
@@ -3027,15 +3029,15 @@ class MainWindow(QMainWindow):
         current_name = str(self.settings_store.value('last_output_name', '')).strip()
         suggested = current_name or self._default_output_name_for_target(supported[0])
         new_name, ok = QInputDialog.getText(
-            self, '出力ファイル名', '保存する .xtc / .xtch のファイル名を入力してください', text=suggested,
+            self, 'Output File Name', 'Enter the output .xtc / .xtch / .xtcz file name', text=suggested,
         )
         if not ok:
-            self.statusBar().showMessage('変換をキャンセルしました。', 3000)
+            self.statusBar().showMessage('Conversion cancelled.', 3000)
             return None
 
         sanitized = ConversionWorker._sanitize_output_stem(new_name)
         if not sanitized:
-            QMessageBox.warning(self, '出力ファイル名', '空の名前は使えません。')
+            QMessageBox.warning(self, 'Output File Name', 'The name cannot be empty.')
             return None
 
         cfg['output_name'] = sanitized
@@ -3048,12 +3050,12 @@ class MainWindow(QMainWindow):
         if not cfg:
             return
         self.run_btn.setEnabled(False)
-        self.run_btn.setText('変換中…')
+        self.run_btn.setText('Converting...')
         self.stop_btn.setEnabled(True)
         self.progress_bar.setRange(0, 0)
-        self.progress_label.setText('変換中です…')
-        self.busy_badge.setText('変換中')
-        self.append_log('変換を開始しました。')
+        self.progress_label.setText('Converting...')
+        self.busy_badge.setText('Converting')
+        self.append_log('Conversion started.')
         self.bottom_tabs.setCurrentIndex(LOG_TAB_INDEX)
 
         self.worker_thread = QThread(self)
@@ -3073,11 +3075,11 @@ class MainWindow(QMainWindow):
             return
         self.worker.stop()
         self.stop_btn.setEnabled(False)
-        self.append_log('停止要求を送りました。現在の変換単位が終わりしだい停止します。')
+        self.append_log('Stop requested. Conversion will stop after the current item finishes.')
 
     def cleanup_worker(self):
         self.run_btn.setEnabled(True)
-        self.run_btn.setText('▶  変換実行')
+        self.run_btn.setText('▶  Convert')
         self.stop_btn.setEnabled(False)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
@@ -3089,10 +3091,10 @@ class MainWindow(QMainWindow):
             self.worker_thread = None
 
     def on_conversion_finished(self, result: dict):
-        msg = result.get('message', '変換完了しました。')
+        msg = result.get('message', 'Conversion complete.')
         stopped = result.get('stopped', False)
         self.progress_label.setText(msg)
-        self.busy_badge.setText('停止' if stopped else '完了')
+        self.busy_badge.setText('Stopped' if stopped else 'Done')
         self.statusBar().showMessage(msg)
         self.populate_results(result.get('converted_files', []))
         if result.get('converted_files'):
@@ -3100,10 +3102,10 @@ class MainWindow(QMainWindow):
         self.bottom_tabs.setCurrentIndex(RESULT_TAB_INDEX)
 
     def on_conversion_error(self, message: str):
-        QMessageBox.critical(self, '変換エラー', message)
-        self.append_log(f'エラー: {message}')
-        self.progress_label.setText(f'エラー: {message}')
-        self.busy_badge.setText('エラー')
+        QMessageBox.critical(self, 'Conversion Error', message)
+        self.append_log(f'Error: {message}')
+        self.progress_label.setText(f'Error: {message}')
+        self.busy_badge.setText('Error')
         self.statusBar().showMessage(message)
         self.bottom_tabs.setCurrentIndex(LOG_TAB_INDEX)
 
@@ -3138,11 +3140,11 @@ class MainWindow(QMainWindow):
             item = None
 
         if not item:
-            QMessageBox.information(self, '実機ビュー', '表示する変換結果を選択してください。')
+            QMessageBox.information(self, 'Device Preview', 'Select a converted result to display.')
             return
         path = item.data(Qt.UserRole)
         if not path:
-            QMessageBox.warning(self, '実機ビュー', '選択した項目のファイルパスを取得できませんでした。')
+            QMessageBox.warning(self, 'Device Preview', 'Could not get the selected file path.')
             return
         self.results_list.setCurrentItem(item)
         self.load_xtc_from_path(path)
@@ -3150,7 +3152,10 @@ class MainWindow(QMainWindow):
     # ── XTCビューア ───────────────────────────────────────
 
     def open_xtc_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'XTC/XTCHを開く', str(Path.home()), 'XTC / XTCH Files (*.xtc *.xtch)')
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Open XTC/XTCH/XTCZ', str(Path.home()),
+            'XTC / XTCH / XTCZ Files (*.xtc *.xtch *.xtcz)',
+        )
         if path:
             self.load_xtc_from_path(path)
 
@@ -3158,18 +3163,20 @@ class MainWindow(QMainWindow):
         try:
             raw = Path(path).read_bytes()
             self.load_xtc_from_bytes(raw)
-            self.append_log(f'XTC/XTCH読込: {path}')
-            self.current_xtc_label.setText(f'表示中: {Path(path).name}')
+            self.append_log(f'Loaded XTC/XTCH/XTCZ: {path}')
+            self.current_xtc_label.setText(f'Showing: {Path(path).name}')
             self.set_main_view_mode('device')
         except Exception as exc:
-            QMessageBox.critical(self, 'XTC読込エラー', str(exc))
+            QMessageBox.critical(self, 'XTC Load Error', str(exc))
 
     def load_xtc_from_bytes(self, data: bytes):
+        if len(data) >= 4 and data[:4] == b'XTZ4':
+            data = core.decompress_xtcz_payload(data)
         self.xtc_bytes = data
         self.xtc_pages = parse_xtc_pages(data)
         self.current_page_index = 0
         if not self.xtc_pages:
-            raise RuntimeError('XTC内にページがありません。')
+            raise RuntimeError('The file contains no pages.')
         self.page_input.blockSignals(True)
         self.page_input.setRange(1, len(self.xtc_pages))
         self.page_input.setValue(1)
@@ -3188,7 +3195,7 @@ class MainWindow(QMainWindow):
             qi = xt_page_blob_to_qimage(blob)
             self.viewer_widget.set_page_image(qi)
         except Exception as exc:
-            QMessageBox.critical(self, 'ページ表示エラー', str(exc))
+            QMessageBox.critical(self, 'Page Display Error', str(exc))
             return
         self.page_input.blockSignals(True)
         self.page_input.setValue(self.current_page_index + 1)
@@ -3196,7 +3203,7 @@ class MainWindow(QMainWindow):
         self.page_total_label.setText(f'/ {len(self.xtc_pages)}')
         self.update_navigation_ui()
 
-    # ── 設定の保存 / 読み込み ──────────────────────────────
+    # ── 設定のSave / 読み込み ──────────────────────────────
 
     def _restore_settings(self):
         if self.settings_store.contains('geometry'):
@@ -3348,49 +3355,49 @@ class MainWindow(QMainWindow):
 
     def show_help_dialog(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle('使い方')
+        dlg.setWindowTitle('Help')
         dlg.resize(640, 500)
         lay = QVBoxLayout(dlg)
         tv = QTextEdit(dlg)
         tv.setReadOnly(True)
         tv.setPlainText("""\
-【基本的な流れ】
-1. 上部の「ファイル」または「フォルダ」で変換対象を選びます。
-2. 左側の設定を調整します。
-3. 右側のフォントビューで文字の見え方を確認します。
-4. 「▶ 変換実行」を押すと .xtc を保存します。
-5. 変換後は実機ビューで XTC を確認できます。
+Basic workflow
+1. Choose an input with File or Folder at the top.
+2. Adjust settings in the left panel.
+3. Check typography in Font Preview.
+4. Press Convert to save an .xtc, .xtch, or .xtcz file.
+5. Review the converted output in Device Preview.
 
-【プレビュー】
-・フォントビュー: 設定中の文字の見え方を確認します。
-・実機ビュー: 変換後の XTC を X3/X4 の外形で確認します。
-・ページ送りはナビゲーションバーの「前/次」ボタン、またはページ番号入力で行います。
-・「反転」を ON にすると、前/次 ボタンの左右配置と動作感を入れ替えられます。
+Preview
+- Font Preview shows a generated sample using the current settings.
+- Device Preview shows a converted XTC/XTCH/XTCZ file in an X3/X4-style frame.
+- Use Previous/Next or the page number field to change pages.
+- Reverse swaps the previous/next button layout and feel.
 
-【表示と実機セクション】
-・機種を選ぶと解像度が自動設定されます（Custom では手動指定）。
-・実寸近似 ON で PC 画面上の実機サイズに近い表示になります。
-・実寸補正は定規で実物と比較しながら調整してください。
+Display and Device
+- Choosing a device sets the resolution automatically. Custom allows manual size entry.
+- Approx. Actual Size makes the on-screen preview closer to the physical device size.
+- Use Size Calibration with a ruler to fine-tune the scale.
 
-【プリセット】
-・コンボボックスで選択し「適用」で呼び出します。
-・「保存」で現在の設定を上書きします。
-・プリセットには禁則処理モードも保存されます。
+Presets
+- Select a preset and press Apply to load it.
+- Press Save to overwrite the selected preset with current settings.
+- Presets include the line-breaking mode.
 
-【下部パネル】
-・「変換結果」タブでファイルをクリックすると実機ビューへ読み込みます。
-・「ログ」タブで変換の詳細を確認できます。
+Bottom Panel
+- Click a file in Results to load it into Device Preview.
+- Use Log to inspect conversion details.
 
-【表示設定】
-・右上の歯車から、白基調 / ダーク の切替ができます。
-・同じ画面で、三本線ボタンの表示 / 非表示も切り替えられます。
+Display Settings
+- Use the gear menu to switch Light/Dark theme.
+- The same menu can show or hide the menu button.
 
-【補足】
-・停止ボタンは変換中のみ有効です。
-・同名ファイルがある場合は (1), (2) を付けて保存します。
+Notes
+- Stop is enabled only during conversion.
+- Existing output names are preserved by adding (1), (2), and so on.
 """)
         lay.addWidget(tv)
-        close_btn = QPushButton('閉じる')
+        close_btn = QPushButton('Close')
         close_btn.clicked.connect(dlg.accept)
         lay.addWidget(close_btn)
         dlg.exec()
@@ -3401,12 +3408,14 @@ class MainWindow(QMainWindow):
 # ─────────────────────────────────────────────────────────
 
 def parse_xtc_pages(data: bytes) -> List[XtcPage]:
+    if len(data) >= 4 and data[:4] == b'XTZ4':
+        data = core.decompress_xtcz_payload(data)
     if len(data) < 48 or data[:4] not in {b'XTC\x00', b'XTCH'}:
-        raise RuntimeError('XTC/XTCHファイルのヘッダが不正です。')
+        raise RuntimeError('Invalid XTC/XTCH file header.')
     count = struct.unpack_from('<H', data, 6)[0]
     table_size = 48 + count * 16
     if table_size > len(data):
-        raise RuntimeError('XTCページテーブルが途中で切れています。')
+        raise RuntimeError('XTC page table is truncated.')
 
     pages = []
     for i in range(count):
@@ -3419,7 +3428,7 @@ def parse_xtc_pages(data: bytes) -> List[XtcPage]:
         )
         end = page.offset + page.length
         if page.offset < table_size or end > len(data):
-            raise RuntimeError(f'XTCページ {i + 1} のオフセットまたは長さが不正です。')
+            raise RuntimeError(f'XTCPage {i + 1} has an invalid offset or length.')
         pages.append(page)
     return pages
 
@@ -3429,22 +3438,22 @@ def _pil_image_to_qimage(img: Image.Image) -> QImage:
     img.save(bio, format='PNG')
     qimg = QImage.fromData(bio.getvalue(), 'PNG')
     if qimg.isNull():
-        raise RuntimeError('画像データのQImage変換に失敗しました。')
+        raise RuntimeError('Failed to convert image data to QImage.')
     return qimg.copy()
 
 
 def xtg_blob_to_qimage(blob: bytes) -> QImage:
     if len(blob) < 22 or blob[:4] != b'XTG\x00':
-        raise RuntimeError('XTC/XTCH内ページデータが不正です。')
+        raise RuntimeError('Invalid page data in XTC/XTCH.')
     width = struct.unpack_from('<H', blob, 4)[0]
     height = struct.unpack_from('<H', blob, 6)[0]
     if width <= 0 or height <= 0:
-        raise RuntimeError('XTC内ページのサイズ情報が不正です。')
+        raise RuntimeError('Invalid page size in XTC.')
     row_bytes = (width + 7) // 8
     expected_payload_len = row_bytes * height
     payload = blob[22:22 + expected_payload_len]
     if len(payload) != expected_payload_len:
-        raise RuntimeError('XTC内ページデータが途中で切れています。')
+        raise RuntimeError('XTC page data is truncated.')
 
     img = Image.new('L', (width, height), 0)
     pixels = img.load()
@@ -3459,16 +3468,16 @@ def xtg_blob_to_qimage(blob: bytes) -> QImage:
 
 def xth_blob_to_qimage(blob: bytes) -> QImage:
     if len(blob) < 22 or blob[:4] != b'XTH\x00':
-        raise RuntimeError('XTCH内ページデータが不正です。')
+        raise RuntimeError('Invalid page data in XTCH.')
     width = struct.unpack_from('<H', blob, 4)[0]
     height = struct.unpack_from('<H', blob, 6)[0]
     if width <= 0 or height <= 0:
-        raise RuntimeError('XTCH内ページのサイズ情報が不正です。')
+        raise RuntimeError('Invalid page size in XTCH.')
     plane_size = ((width * height) + 7) // 8
     expected_payload_len = plane_size * 2
     payload = blob[22:22 + expected_payload_len]
     if len(payload) != expected_payload_len:
-        raise RuntimeError('XTCH内ページデータが途中で切れています。')
+        raise RuntimeError('XTCH page data is truncated.')
     plane1 = payload[:plane_size]
     plane2 = payload[plane_size:]
     img = Image.new('L', (width, height), 255)
@@ -3492,7 +3501,7 @@ def xt_page_blob_to_qimage(blob: bytes) -> QImage:
         return xtg_blob_to_qimage(blob)
     if mark == b'XTH\x00':
         return xth_blob_to_qimage(blob)
-    raise RuntimeError('未対応のページ形式です。')
+    raise RuntimeError('Unsupported page format.')
 
 
 # ─────────────────────────────────────────────────────────

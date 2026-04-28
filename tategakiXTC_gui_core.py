@@ -48,7 +48,7 @@ def _require_ebooklib_epub():
         from ebooklib import epub as epub_module
     except ImportError as e:
         raise RuntimeError(
-            "EPUB変換には ebooklib が必要です。`pip install ebooklib` を実行してください。"
+            "EPUB conversion requires ebooklib. Run `pip install ebooklib`."
         ) from e
     return epub_module
 
@@ -59,7 +59,7 @@ def _require_patoolib():
         import patoolib as patoolib_module
     except ImportError as e:
         raise RuntimeError(
-            "アーカイブ変換には patool が必要です。`pip install patool` を実行してください。"
+            "Archive conversion requires patool. Run `pip install patool`."
         ) from e
     return patoolib_module
 
@@ -72,7 +72,7 @@ def _require_bs4_beautifulsoup():
         from bs4 import BeautifulSoup as bs4_BeautifulSoup
     except ImportError as e:
         raise RuntimeError(
-            "EPUB変換には beautifulsoup4 が必要です。`pip install beautifulsoup4` を実行してください。"
+            "EPUB conversion requires beautifulsoup4. Run `pip install beautifulsoup4`."
         ) from e
     return bs4_BeautifulSoup
 
@@ -83,9 +83,17 @@ def _require_tqdm():
         from tqdm import tqdm as tqdm_func
     except ImportError as e:
         raise RuntimeError(
-            "進捗表示には tqdm が必要です。`pip install tqdm` を実行してください。"
+            "Progress display requires tqdm. Run `pip install tqdm`."
         ) from e
     return tqdm_func
+
+
+def _optional_lz4_block():
+    try:
+        from lz4 import block as lz4_block
+    except Exception:
+        return None
+    return lz4_block
 
 def _natural_sort_key(path_like):
     """パスを自然順で比較するキーを返す。数値部分は整数として扱う。"""
@@ -695,7 +703,7 @@ def get_font_list():
     for f in ["C:/Windows/Fonts/msmincho.ttc", "C:/Windows/Fonts/msgothic.ttc"]:
         if os.path.exists(f):
             fonts.append(f)
-    return fonts if fonts else ["(フォントなし)"]
+    return fonts if fonts else ["(no fonts)"]
 
 
 def resolve_font_path(font_value):
@@ -711,11 +719,11 @@ def require_font_path(font_value):
     """有効なフォントパスを返し、未指定や欠落時は分かりやすい例外を送出する。"""
     font_path = resolve_font_path(font_value)
     if not font_path:
-        raise RuntimeError("フォントが指定されていません。")
+        raise RuntimeError("No font was selected.")
     if not font_path.exists():
-        raise RuntimeError(f"フォントが見つかりません: {font_path}")
+        raise RuntimeError(f"Font not found: {font_path}")
     if not font_path.is_file():
-        raise RuntimeError(f"フォントパスが不正です: {font_path}")
+        raise RuntimeError(f"Invalid font path: {font_path}")
     return font_path
 
 
@@ -732,18 +740,30 @@ def iter_conversion_targets(target_path):
 
 
 def should_skip_conversion_target(path):
-    return path.stem.endswith("_c") or path.suffix.lower() in {".xtc", ".xtch"}
+    return path.stem.endswith("_c") or path.suffix.lower() in {".xtc", ".xtch", ".xtcz"}
 
 
 def _normalize_output_format(value):
     fmt = str(value or 'xtc').strip().lower()
-    return 'xtch' if fmt == 'xtch' else 'xtc'
+    return fmt if fmt in {'xtc', 'xtch', 'xtcz', 'xtchz'} else 'xtc'
+
+
+def _payload_output_format(value):
+    return 'xtch' if _normalize_output_format(value) in {'xtch', 'xtchz'} else 'xtc'
+
+
+def output_extension(output_format='xtc'):
+    fmt = _normalize_output_format(output_format)
+    if fmt == 'xtch':
+        return '.xtch'
+    if fmt in {'xtcz', 'xtchz'}:
+        return '.xtcz'
+    return '.xtc'
 
 def get_output_path_for_target(path, output_format='xtc'):
     suffix = path.suffix.lower()
     if suffix in SUPPORTED_INPUT_SUFFIXES:
-        ext = '.xtch' if _normalize_output_format(output_format) == 'xtch' else '.xtc'
-        return path.with_suffix(ext)
+        return path.with_suffix(output_extension(output_format))
     return None
 
 
@@ -883,10 +903,115 @@ def png_to_xth_bytes(img, w, h, args):
     return struct.pack("<4sHHBBI8s", b"XTH\x00", w, h, 0, 0, len(data), md5) + data
 
 
-def build_xtc(page_blobs, out_path, w, h, output_format='xtc'):
+XTCZ_BLOCK_SIZE = 4096
+XTCZ_RAW_CHUNK_FLAG = 0x80000000
+
+
+def compress_xtcz_payload(raw_payload, block_size=XTCZ_BLOCK_SIZE):
+    lz4_block = _optional_lz4_block()
+    block_size = int(block_size or XTCZ_BLOCK_SIZE)
+    if block_size <= 0:
+        raise ValueError("XTCZ block size must be positive.")
+    if len(raw_payload) > 0xFFFFFFFF:
+        raise ValueError("XTCZ payload is too large.")
+
+    out = bytearray(struct.pack("<4sII", b"XTZ4", len(raw_payload), block_size))
+    for off in range(0, len(raw_payload), block_size):
+        chunk = raw_payload[off:off + block_size]
+        compressed = lz4_block.compress(chunk, store_size=False) if lz4_block else None
+        if compressed is not None and len(compressed) < len(chunk):
+            out += struct.pack("<I", len(compressed))
+            out += compressed
+        else:
+            out += struct.pack("<I", XTCZ_RAW_CHUNK_FLAG | len(chunk))
+            out += chunk
+    return bytes(out)
+
+
+def _lz4_read_length(data, pos, base):
+    length = base
+    if base == 15:
+        while True:
+            if pos >= len(data):
+                raise RuntimeError("Invalid LZ4 block.")
+            value = data[pos]
+            pos += 1
+            length += value
+            if value != 255:
+                break
+    return length, pos
+
+
+def _lz4_block_decompress(data, expected_size):
+    out = bytearray()
+    pos = 0
+    while pos < len(data):
+        token = data[pos]
+        pos += 1
+        literal_len, pos = _lz4_read_length(data, pos, token >> 4)
+        if pos + literal_len > len(data):
+            raise RuntimeError("Invalid LZ4 literal length.")
+        out += data[pos:pos + literal_len]
+        pos += literal_len
+        if pos >= len(data):
+            break
+        if pos + 2 > len(data):
+            raise RuntimeError("Invalid LZ4 match offset.")
+        offset = data[pos] | (data[pos + 1] << 8)
+        pos += 2
+        if offset <= 0 or offset > len(out):
+            raise RuntimeError("Invalid LZ4 match offset.")
+        match_len, pos = _lz4_read_length(data, pos, token & 0x0F)
+        match_len += 4
+        for _ in range(match_len):
+            out.append(out[-offset])
+        if len(out) > expected_size:
+            raise RuntimeError("LZ4 block expanded beyond the expected size.")
+    if len(out) != expected_size:
+        raise RuntimeError("LZ4 block size does not match the expected size.")
+    return bytes(out)
+
+
+def decompress_xtcz_payload(data):
+    if len(data) < 12 or data[:4] != b"XTZ4":
+        raise RuntimeError("Invalid XTCZ header.")
+    lz4_block = _optional_lz4_block()
+    expected_size, block_size = struct.unpack_from("<II", data, 4)
+    if block_size <= 0:
+        raise RuntimeError("Invalid XTCZ block size.")
+    out = bytearray()
+    pos = 12
+    while len(out) < expected_size:
+        if pos + 4 > len(data):
+            raise RuntimeError("XTCZ chunk table is truncated.")
+        descriptor = struct.unpack_from("<I", data, pos)[0]
+        pos += 4
+        raw_chunk = bool(descriptor & XTCZ_RAW_CHUNK_FLAG)
+        chunk_len = descriptor & 0x7FFFFFFF
+        if chunk_len <= 0 or pos + chunk_len > len(data):
+            raise RuntimeError("Invalid XTCZ chunk length.")
+        chunk = data[pos:pos + chunk_len]
+        pos += chunk_len
+        if raw_chunk:
+            out += chunk
+        else:
+            remaining = expected_size - len(out)
+            chunk_expected = min(block_size, remaining)
+            if lz4_block:
+                out += lz4_block.decompress(chunk, uncompressed_size=chunk_expected)
+            else:
+                out += _lz4_block_decompress(chunk, chunk_expected)
+        if len(out) > expected_size:
+            raise RuntimeError("XTCZ decompressed data exceeds the expected size.")
+    if len(out) != expected_size:
+        raise RuntimeError("XTCZ decompressed size does not match the header.")
+    return bytes(out)
+
+
+def build_xtc_bytes(page_blobs, w, h, output_format='xtc'):
     cnt = len(page_blobs)
     if cnt == 0:
-        raise ValueError("変換データがありません。")
+        raise ValueError("No conversion data was generated.")
     idx_off = 48
     data_off = 48 + cnt * 16
     idx_table = bytearray()
@@ -894,17 +1019,20 @@ def build_xtc(page_blobs, out_path, w, h, output_format='xtc'):
     for b in page_blobs:
         idx_table += struct.pack("<Q I H H", curr_off, len(b), w, h)
         curr_off += len(b)
-    mark = b"XTCH" if _normalize_output_format(output_format) == 'xtch' else b"XTC\x00"
+    mark = b"XTCH" if _payload_output_format(output_format) == 'xtch' else b"XTC\x00"
     header = struct.pack("<4sHHBBBBIQQQQ", mark, 1, cnt, 1, 0, 0, 0, 0, 0, idx_off, data_off, 0)
+    return bytes(header + idx_table + b''.join(page_blobs))
+
+
+def build_xtc(page_blobs, out_path, w, h, output_format='xtc'):
+    raw_payload = build_xtc_bytes(page_blobs, w, h, output_format)
+    data = compress_xtcz_payload(raw_payload) if _normalize_output_format(output_format) in {'xtcz', 'xtchz'} else raw_payload
     with open(out_path, "wb") as f:
-        f.write(header)
-        f.write(idx_table)
-        for blob in page_blobs:
-            f.write(blob)
+        f.write(data)
 
 
 def page_image_to_xt_bytes(img, w, h, args):
-    return png_to_xth_bytes(img, w, h, args) if _normalize_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else png_to_xtg_bytes(img, w, h, args)
+    return png_to_xth_bytes(img, w, h, args) if _payload_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else png_to_xtg_bytes(img, w, h, args)
 
 
 def _normalize_progress_bar_side(value):
@@ -961,7 +1089,7 @@ def _chapter_bounds_for_page(page_index, page_count, chapter_starts):
 
 
 def draw_page_progress_bar(img, page_index, page_count, args, chapter_starts=None):
-    """本文ページの端に章区切り付きの読書進捗バーを焼き込む。"""
+    """本文ページの端にchapter区切り付きの読書進捗バーを焼き込む。"""
     if not _arg_bool(args, 'progress_bar', False) or page_count <= 1:
         return img
 
@@ -976,7 +1104,7 @@ def draw_page_progress_bar(img, page_index, page_count, args, chapter_starts=Non
     x = max(3, min(w - 4, margin_l // 2)) if side == 'left' else max(3, min(w - 4, w - max(2, margin_r // 2) - 1))
 
     draw = ImageDraw.Draw(img)
-    output_format = _normalize_output_format(_arg_get(args, 'output_format', 'xtc'))
+    output_format = _payload_output_format(_arg_get(args, 'output_format', 'xtc'))
     track_fill = 176 if output_format == 'xtch' else 255
     starts, _chapter_start, chapter_end = _chapter_bounds_for_page(page_index, page_count, chapter_starts)
     remaining_in_chapter = max(0, chapter_end - page_index - 1)
@@ -1032,7 +1160,7 @@ def generate_preview_base64(args):
         mode = args.get('mode', 'text')
         night_mode = str(args.get('night_mode', '')).lower() == 'true'
         kinsoku_mode = _normalize_kinsoku_mode(args.get('kinsoku_mode', 'standard'))
-        output_format = _normalize_output_format(args.get('output_format', 'xtc'))
+        output_format = _payload_output_format(args.get('output_format', 'xtc'))
 
         if mode == 'image':
             file_b64 = args.get('file_b64')
@@ -1277,7 +1405,7 @@ def generate_preview_base64(args):
 
     except Exception as e:
         print(f"Preview Error: {e}")
-        raise RuntimeError(f"プレビュー生成に失敗しました: {e}") from e
+        raise RuntimeError(f"Preview generation failed: {e}") from e
 
 
 # ==========================================
@@ -1294,7 +1422,7 @@ def process_image_data(data, args):
             bg.paste(s_img, ((args.width - s_img.width) // 2, (args.height - s_img.height) // 2))
             return page_image_to_xt_bytes(bg, args.width, args.height, args)
     except Exception as e:
-        print(f"画像処理エラー: {e}")
+        print(f"Image processing error: {e}")
         return None
 
 
@@ -1314,7 +1442,7 @@ def read_text_file_with_fallback(text_path):
         last_error.object if last_error else raw,
         last_error.start if last_error else 0,
         last_error.end if last_error else 1,
-        'テキストを UTF-8 / CP932 として読み込めませんでした。'
+        'Could not read the text as UTF-8 or CP932.'
     )
 
 
@@ -1449,7 +1577,7 @@ def _has_renderable_text_blocks(blocks):
 
 def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path=None):
     if not _has_renderable_text_blocks(blocks):
-        raise RuntimeError("入力ファイルに変換できる本文がありません。")
+        raise RuntimeError("The input file does not contain convertible body text.")
 
     font_path = require_font_path(font_path)
     font = ImageFont.truetype(str(font_path), args.font_size)
@@ -1572,7 +1700,7 @@ def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path
     if has_drawn_on_page:
         add_page(img)
 
-    out_path = Path(output_path) if output_path else Path(source_path).with_suffix('.xtc')
+    out_path = Path(output_path) if output_path else Path(source_path).with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
     rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=[0])
     page_blobs = [page_image_to_xt_bytes(page_image, args.width, args.height, args) for page_image, _ in rendered_pages]
     build_xtc(page_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
@@ -1598,8 +1726,7 @@ def process_archive(archive_path, args, output_path=None):
     """ZIP / CBZ / CBR / RAR 形式の画像アーカイブを XTC へ変換する。"""
     archive_path = Path(archive_path)
     print(f"\n[アーカイブ変換開始] {archive_path.name}")
-    ext = '.xtch' if _normalize_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else '.xtc'
-    out_path = Path(output_path) if output_path else archive_path.with_suffix(ext)
+    out_path = Path(output_path) if output_path else archive_path.with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
     tqdm = _require_tqdm()
     xtg_blobs = []
 
@@ -1608,29 +1735,29 @@ def process_archive(archive_path, args, output_path=None):
             patoolib = _require_patoolib()
             patoolib.extract_archive(str(archive_path), outdir=tmpdir, verbosity=-1)
         except Exception as e:
-            raise RuntimeError(f"解凍に失敗しました: {e}") from e
+            raise RuntimeError(f"Extraction failed: {e}") from e
 
         img_files = sorted(
             [p for p in Path(tmpdir).rglob("*") if p.suffix.lower() in IMG_EXTS],
             key=lambda p: _natural_sort_key(p.relative_to(tmpdir)),
         )
-        print(f"デバッグ: {len(img_files)} 枚の画像を検出しました。変換を開始します...")
+        print(f"Debug: {len(img_files)} image(s) found. Starting conversion...")
 
-        for img_p in tqdm(img_files, desc="通常変換中", unit="枚", leave=False):
+        for img_p in tqdm(img_files, desc="Converting", unit="image(s)", leave=False):
             try:
                 with open(img_p, 'rb') as f:
                     blob = process_image_data(f.read(), args)
                     if blob:
                         xtg_blobs.append(blob)
             except Exception as e:
-                print(f"画像スキップ ({img_p.name}): {e}")
+                print(f"Skipped image ({img_p.name}): {e}")
                 continue
 
     if len(xtg_blobs) > 0:
         build_xtc(xtg_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
-        print(f"✓ 通常変換完了: {out_path.name}")
+        print(f"Conversion complete: {out_path.name}")
         return out_path
-    raise RuntimeError("変換できる画像が見つかりませんでした。")
+    raise RuntimeError("No convertible images were found.")
 
 
 def process_epub(epub_path, font_path, args, output_path=None):
@@ -1722,7 +1849,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
         ):
             docs.append(it)
 
-    for item in tqdm(docs, desc="描画中", unit="章", leave=False):
+    for item in tqdm(docs, desc="Rendering", unit="chapter", leave=False):
         chapter_start = len(rendered_pages)
         current_doc_file_name = getattr(item, 'file_name', '')
         soup = BeautifulSoup(item.get_content(), 'html.parser')
@@ -1972,7 +2099,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
                                 add_page(s_img, is_illustration=True)
                                 new_blank_page()
                     except Exception as e:
-                        print(f"画像処理エラー ({resolved_src or raw_src}): {e}")
+                        print(f"Image processing error ({resolved_src or raw_src}): {e}")
                 return
 
             if is_paragraph_like(node):
@@ -2012,8 +2139,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
         if len(rendered_pages) > chapter_start:
             chapter_starts.append(chapter_start)
 
-    ext = '.xtch' if _normalize_output_format(getattr(args, 'output_format', 'xtc')) == 'xtch' else '.xtc'
-    out_path = Path(output_path) if output_path else epub_path.with_suffix(ext)
+    out_path = Path(output_path) if output_path else epub_path.with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
     rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=chapter_starts)
     xtg_blobs = []
     for page_image, is_illustration in rendered_pages:
@@ -2025,7 +2151,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
 
 
 def main():
-    raise SystemExit("GUI版は tategakiXTC_gui_studio.py を起動してください。")
+    raise SystemExit("Start the GUI with tategakiXTC_gui_studio.py.")
 
 
 if __name__ == "__main__":

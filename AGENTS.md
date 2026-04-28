@@ -11,12 +11,12 @@ This is a Python/PySide6 GUI app for converting Japanese EPUB, text, Markdown, a
 - `XTG` is the per-page 1-bit monochrome bitmap format used inside `XTC`.
 - `XTH` is the per-page 2-bit / 4-level grayscale bitmap format used inside `XTCH`.
 - The output is not reflowable text. EPUB/TXT/MD content is laid out and rasterized into page images before writing.
-- This repo does not implement `XTCZ`.
+- `XTCZ` (`.xtcz`) is an `XTZ4` compressed wrapper around a complete XTC or XTCH payload. The wrapper uses 4096-byte chunks with raw chunks supported and LZ4 block chunks decoded by the reader.
 
 ## Important Files
 
-- `tategakiXTC_gui_core.py`: conversion core, EPUB/text parsing, vertical text rendering, image filtering, XTG/XTH encoding, XTC/XTCH container writing.
-- `tategakiXTC_gui_studio.py`: PySide6 GUI, settings, presets, preview generation, conversion worker, XTC/XTCH viewer.
+- `tategakiXTC_gui_core.py`: conversion core, EPUB/text parsing, vertical text rendering, image filtering, XTG/XTH encoding, XTC/XTCH container writing, and XTCZ wrapping/unwrapping.
+- `tategakiXTC_gui_studio.py`: PySide6 GUI, settings, presets, preview generation, conversion worker, XTC/XTCH/XTCZ viewer.
 - `tategakiXTC_gui_studio.ini`: local GUI settings. It can be dirty from app/runtime state; do not rewrite it unless requested.
 - `Font/`: bundled Japanese fonts used by default presets and preview/conversion.
 
@@ -34,7 +34,7 @@ Image/archive inputs:
 images -> resize/center on device canvas -> XTG/XTH page blobs -> XTC/XTCH container
 ```
 
-The font preview in the GUI generates a fresh sample bitmap from current settings. The device preview for a converted file reads the actual XTC/XTCH bytes, decodes the selected page blob, and displays the literal bitmap.
+The font preview in the GUI generates a fresh sample bitmap from current settings. The device preview for a converted file reads the actual XTC/XTCH bytes, or decompresses XTCZ to XTC/XTCH first, decodes the selected page blob, and displays the literal bitmap.
 
 ## Progress Bar Notes
 
