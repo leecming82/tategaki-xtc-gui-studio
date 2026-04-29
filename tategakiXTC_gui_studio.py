@@ -3026,8 +3026,7 @@ class MainWindow(QMainWindow):
         if len(supported) != 1:
             return cfg
 
-        current_name = str(self.settings_store.value('last_output_name', '')).strip()
-        suggested = current_name or self._default_output_name_for_target(supported[0])
+        suggested = self._default_output_name_for_target(supported[0])
         new_name, ok = QInputDialog.getText(
             self, 'Output File Name', 'Enter the output .xtc / .xtch / .xtcz file name', text=suggested,
         )
@@ -3041,8 +3040,6 @@ class MainWindow(QMainWindow):
             return None
 
         cfg['output_name'] = sanitized
-        self.settings_store.setValue('last_output_name', sanitized)
-        self.settings_store.sync()
         return cfg
 
     def start_conversion(self):
