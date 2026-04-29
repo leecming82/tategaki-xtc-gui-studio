@@ -13,6 +13,7 @@ import re
 import shutil
 import struct
 import tempfile
+import time
 import posixpath
 from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
@@ -94,6 +95,23 @@ def _optional_lz4_block():
     except Exception:
         return None
     return lz4_block
+
+
+def _format_elapsed(seconds):
+    seconds = max(0.0, float(seconds))
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes, rem = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes)}m {rem:04.1f}s"
+    hours, minutes = divmod(int(minutes), 60)
+    return f"{hours}h {minutes:02d}m {rem:04.1f}s"
+
+
+def _profile_log(args, message):
+    callback = getattr(args, "profile_log", None)
+    if callable(callback):
+        callback(f"Timing: {message}")
 
 def _natural_sort_key(path_like):
     """パスを自然順で比較するキーを返す。数値部分は整数として扱う。"""
@@ -1576,9 +1594,11 @@ def _has_renderable_text_blocks(blocks):
 
 
 def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path=None):
+    total_start = time.perf_counter()
     if not _has_renderable_text_blocks(blocks):
         raise RuntimeError("The input file does not contain convertible body text.")
 
+    render_start = time.perf_counter()
     font_path = require_font_path(font_path)
     font = ImageFont.truetype(str(font_path), args.font_size)
     rendered_pages = []
@@ -1701,9 +1721,17 @@ def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path
         add_page(img)
 
     out_path = Path(output_path) if output_path else Path(source_path).with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
+    _profile_log(args, f"Text rendering: {len(rendered_pages)} page(s), {_format_elapsed(time.perf_counter() - render_start)}")
+    phase_start = time.perf_counter()
     rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=[0])
+    _profile_log(args, f"Progress overlay: {_format_elapsed(time.perf_counter() - phase_start)}")
+    phase_start = time.perf_counter()
     page_blobs = [page_image_to_xt_bytes(page_image, args.width, args.height, args) for page_image, _ in rendered_pages]
+    _profile_log(args, f"XT page encoding: {len(page_blobs)} page(s), {_format_elapsed(time.perf_counter() - phase_start)}")
+    phase_start = time.perf_counter()
     build_xtc(page_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
+    _profile_log(args, f"Container write: {_format_elapsed(time.perf_counter() - phase_start)}")
+    _profile_log(args, f"Text core total: {_format_elapsed(time.perf_counter() - total_start)}")
     return out_path
 
 
@@ -1724,6 +1752,7 @@ def process_markdown_file(text_path, font_path, args, output_path=None):
 
 def process_archive(archive_path, args, output_path=None):
     """ZIP / CBZ / CBR / RAR 形式の画像アーカイブを XTC へ変換する。"""
+    total_start = time.perf_counter()
     archive_path = Path(archive_path)
     print(f"\n[アーカイブ変換開始] {archive_path.name}")
     out_path = Path(output_path) if output_path else archive_path.with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
@@ -1733,16 +1762,21 @@ def process_archive(archive_path, args, output_path=None):
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             patoolib = _require_patoolib()
+            phase_start = time.perf_counter()
             patoolib.extract_archive(str(archive_path), outdir=tmpdir, verbosity=-1)
+            _profile_log(args, f"Archive extraction: {_format_elapsed(time.perf_counter() - phase_start)}")
         except Exception as e:
             raise RuntimeError(f"Extraction failed: {e}") from e
 
+        phase_start = time.perf_counter()
         img_files = sorted(
             [p for p in Path(tmpdir).rglob("*") if p.suffix.lower() in IMG_EXTS],
             key=lambda p: _natural_sort_key(p.relative_to(tmpdir)),
         )
+        _profile_log(args, f"Archive scan: {len(img_files)} image(s), {_format_elapsed(time.perf_counter() - phase_start)}")
         print(f"Debug: {len(img_files)} image(s) found. Starting conversion...")
 
+        phase_start = time.perf_counter()
         for img_p in tqdm(img_files, desc="Converting", unit="image(s)", leave=False):
             try:
                 with open(img_p, 'rb') as f:
@@ -1752,9 +1786,13 @@ def process_archive(archive_path, args, output_path=None):
             except Exception as e:
                 print(f"Skipped image ({img_p.name}): {e}")
                 continue
+        _profile_log(args, f"Archive image encoding: {len(xtg_blobs)} page(s), {_format_elapsed(time.perf_counter() - phase_start)}")
 
     if len(xtg_blobs) > 0:
+        phase_start = time.perf_counter()
         build_xtc(xtg_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
+        _profile_log(args, f"Container write: {_format_elapsed(time.perf_counter() - phase_start)}")
+        _profile_log(args, f"Archive core total: {_format_elapsed(time.perf_counter() - total_start)}")
         print(f"Conversion complete: {out_path.name}")
         return out_path
     raise RuntimeError("No convertible images were found.")
@@ -1762,11 +1800,15 @@ def process_archive(archive_path, args, output_path=None):
 
 def process_epub(epub_path, font_path, args, output_path=None):
     """EPUB ファイルを縦書き XTC へ変換する。"""
+    epub_total_start = time.perf_counter()
     epub_path = Path(epub_path)
     epub = _require_ebooklib_epub()
     BeautifulSoup = _require_bs4_beautifulsoup()
     tqdm = _require_tqdm()
+    phase_start = time.perf_counter()
     book = epub.read_epub(str(epub_path))
+    _profile_log(args, f"EPUB read: {_format_elapsed(time.perf_counter() - phase_start)}")
+    phase_start = time.perf_counter()
     font_path = require_font_path(font_path)
     font = ImageFont.truetype(str(font_path), args.font_size)
     ruby_font = ImageFont.truetype(str(font_path), args.ruby_size)
@@ -1849,7 +1891,15 @@ def process_epub(epub_path, font_path, args, output_path=None):
         ):
             docs.append(it)
 
-    for item in tqdm(docs, desc="Rendering", unit="chapter", leave=False):
+    _profile_log(
+        args,
+        f"EPUB prepared: {len(docs)} spine document(s), {len(image_map)} image(s) "
+        f"({_format_elapsed(time.perf_counter() - phase_start)})",
+    )
+
+    render_start = time.perf_counter()
+    for doc_index, item in enumerate(tqdm(docs, desc="Rendering", unit="chapter", leave=False), 1):
+        chapter_timer = time.perf_counter()
         chapter_start = len(rendered_pages)
         current_doc_file_name = getattr(item, 'file_name', '')
         soup = BeautifulSoup(item.get_content(), 'html.parser')
@@ -2138,15 +2188,29 @@ def process_epub(epub_path, font_path, args, output_path=None):
             add_page(img)
         if len(rendered_pages) > chapter_start:
             chapter_starts.append(chapter_start)
+        pages_added = len(rendered_pages) - chapter_start
+        _profile_log(
+            args,
+            f"EPUB render {doc_index}/{len(docs)} {Path(current_doc_file_name).name or '(untitled)'}: "
+            f"{pages_added} page(s), {_format_elapsed(time.perf_counter() - chapter_timer)}",
+        )
 
     out_path = Path(output_path) if output_path else epub_path.with_suffix(output_extension(getattr(args, 'output_format', 'xtc')))
+    _profile_log(args, f"EPUB rendering total: {len(rendered_pages)} page(s), {_format_elapsed(time.perf_counter() - render_start)}")
+    phase_start = time.perf_counter()
     rendered_pages = apply_page_progress_bars(rendered_pages, args, chapter_starts=chapter_starts)
+    _profile_log(args, f"Progress overlay: {_format_elapsed(time.perf_counter() - phase_start)}")
+    phase_start = time.perf_counter()
     xtg_blobs = []
     for page_image, is_illustration in rendered_pages:
         # イラストページは night_mode を無効にして出力する
         page_args = dc_replace(args, night_mode=False) if is_illustration else args
         xtg_blobs.append(page_image_to_xt_bytes(page_image, args.width, args.height, page_args))
+    _profile_log(args, f"XT page encoding: {len(xtg_blobs)} page(s), {_format_elapsed(time.perf_counter() - phase_start)}")
+    phase_start = time.perf_counter()
     build_xtc(xtg_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
+    _profile_log(args, f"Container write: {_format_elapsed(time.perf_counter() - phase_start)}")
+    _profile_log(args, f"EPUB core total: {_format_elapsed(time.perf_counter() - epub_total_start)}")
     return out_path
 
 

@@ -10,6 +10,7 @@ import ctypes
 import importlib
 import struct
 import sys
+import time
 from io import BytesIO
 from copy import deepcopy
 from dataclasses import asdict, dataclass
@@ -122,6 +123,17 @@ PROCESSOR_BY_SUFFIX = {
     '.md': core.process_markdown_file,
     '.markdown': core.process_markdown_file,
 }
+
+
+def format_elapsed(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if seconds < 60:
+        return f'{seconds:.2f}s'
+    minutes, rem = divmod(seconds, 60)
+    if minutes < 60:
+        return f'{int(minutes)}m {rem:04.1f}s'
+    hours, minutes = divmod(int(minutes), 60)
+    return f'{hours}h {minutes:02d}m {rem:04.1f}s'
 
 
 # ─────────────────────────────────────────────────────────
@@ -476,9 +488,11 @@ class ConversionWorker(QObject):
         self._stop_requested = True
 
     def run(self):
+        started_at = time.perf_counter()
         try:
             self.finished.emit(self._convert())
         except Exception as exc:
+            self.log.emit(f'Conversion failed after {format_elapsed(time.perf_counter() - started_at)}.')
             self.error.emit(str(exc))
 
     @staticmethod
@@ -535,6 +549,7 @@ class ConversionWorker(QObject):
         return core.process_archive(path, args, output_path=out_path)
 
     def _convert(self) -> dict:
+        total_start = time.perf_counter()
         cfg = self.settings_dict
         target_raw = str(cfg.get('target', '')).strip()
         if not target_raw:
@@ -548,6 +563,7 @@ class ConversionWorker(QObject):
             raise RuntimeError(f'Font not found: {cfg.get("font_file", "") or font_path}')
 
         args = self._build_args(cfg)
+        args.profile_log = self.log.emit
         supported = self._resolve_supported_targets(tp)
         if not supported:
             raise RuntimeError(f'No supported EPUB / ZIP / RAR / CBZ / CBR / {TEXT_OR_MARKDOWN_LABEL} input was found.')
@@ -561,12 +577,14 @@ class ConversionWorker(QObject):
                 self.log.emit('Stop request received.')
                 break
             self.log.emit(f'[{idx}/{total}] Converting: {path.name}')
+            item_start = time.perf_counter()
             out_path = self._output_path_for_target(path, args, requested_name, total)
             if not out_path:
                 continue
             saved = self._process_target(path, font_path, args, out_path)
+            item_elapsed = time.perf_counter() - item_start
             converted.append(str(saved))
-            self.log.emit(f'Save: {Path(saved).name}')
+            self.log.emit(f'Save: {Path(saved).name} ({format_elapsed(item_elapsed)})')
             if self._stop_requested:
                 stopped = True
                 self.log.emit('Stopped.')
@@ -581,13 +599,21 @@ class ConversionWorker(QObject):
             except Exception:
                 pass
 
+        total_elapsed = time.perf_counter() - total_start
+        elapsed_text = format_elapsed(total_elapsed)
         msg = (
-            f'Conversion stopped. ({len(converted)} saved)'
+            f'Conversion stopped. ({len(converted)} saved, elapsed {elapsed_text})'
             if stopped
-            else f'Conversion complete.({len(converted)} item(s))'
+            else f'Conversion complete. ({len(converted)} item(s), elapsed {elapsed_text})'
         )
         self.log.emit(msg)
-        return {'message': msg, 'converted_files': converted, 'stopped': stopped}
+        return {
+            'message': msg,
+            'converted_files': converted,
+            'stopped': stopped,
+            'elapsed_seconds': total_elapsed,
+            'elapsed_text': elapsed_text,
+        }
 
 
 # ─────────────────────────────────────────────────────────
