@@ -876,12 +876,18 @@ def png_to_xtg_bytes(img, w, h, args):
     if getattr(args, 'night_mode', False):
         bw_img = ImageOps.invert(bw_img.convert("L"))
     row_bytes = (w + 7) // 8
-    data = bytearray(row_bytes * h)
-    pixels = bw_img.load()
-    for y in range(h):
-        for x in range(w):
-            if pixels[x, y] > 0:
-                data[y * row_bytes + (x // 8)] |= 1 << (7 - (x % 8))
+    if bw_img.mode != "1":
+        bw_img = bw_img.point(lambda x: 255 if x > 0 else 0, mode="1")
+    data = bw_img.tobytes()
+    expected_len = row_bytes * h
+    if len(data) != expected_len:
+        packed = bytearray(expected_len)
+        pixels = bw_img.load()
+        for y in range(h):
+            for x in range(w):
+                if pixels[x, y] > 0:
+                    packed[y * row_bytes + (x // 8)] |= 1 << (7 - (x % 8))
+        data = bytes(packed)
     md5 = hashlib.md5(data).digest()[:8]
     return struct.pack("<4sHHBBI8s", b"XTG\x00", w, h, 0, 0, len(data), md5) + data
 
