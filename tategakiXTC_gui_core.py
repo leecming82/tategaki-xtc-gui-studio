@@ -1145,15 +1145,21 @@ def draw_page_progress_bar(img, page_index, page_count, args, chapter_starts=Non
         y = max(top, min(bottom, top + int(round(height * start / page_count))))
         draw.line((x - tick_half, y, x + tick_half, y), fill=0, width=1)
 
-    label = f"{page_index + 1}/{page_count} {remaining_in_chapter} left"
+    page_label = f"{page_index + 1}/{page_count}"
+    chapter_label = f"{remaining_in_chapter} left"
     label_font = _load_progress_font()
-    label_w, label_h = _text_size(draw, label, label_font)
+    page_label_w, page_label_h = _text_size(draw, page_label, label_font)
+    chapter_label_w, chapter_label_h = _text_size(draw, chapter_label, label_font)
+    label_gap = 12
+    label_w = page_label_w + label_gap + chapter_label_w
+    label_h = max(page_label_h, chapter_label_h)
     label_y = min(h - int(label_h) - 1, bottom + 2)
     if label_y <= bottom:
         label_y = max(top, bottom - int(label_h))
     label_x = x + 6 if side == 'left' else x - int(label_w) - 6
     label_x = max(1, min(w - int(label_w) - 1, label_x))
-    draw.text((label_x, label_y), label, fill=0, font=label_font)
+    draw.text((label_x, label_y), page_label, fill=0, font=label_font)
+    draw.text((label_x + page_label_w + label_gap, label_y), chapter_label, fill=0, font=label_font)
     return img
 
 
