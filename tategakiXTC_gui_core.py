@@ -1070,9 +1070,11 @@ def _build_xtc_chapter_block(chapters, page_count):
         start_page = max(0, min(int(chapter.get('start_page', 0)), max_page))
         end_page = chapter.get('end_page', start_page)
         end_page = max(start_page, min(int(end_page), max_page))
+        serialized_start_page = min(start_page + 1, 0xFFFF)
+        serialized_end_page = min(end_page + 1, 0xFFFF)
         out += (
             _fixed_utf8_field(chapter.get('name'), 80) +
-            struct.pack('<H H I I I', start_page, end_page, 0, 0, 0)
+            struct.pack('<H H I I I', serialized_start_page, serialized_end_page, 0, 0, 0)
         )
     return bytes(out)
 
