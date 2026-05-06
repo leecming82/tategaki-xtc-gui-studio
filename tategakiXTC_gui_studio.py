@@ -3436,13 +3436,16 @@ def parse_xtc_pages(data: bytes) -> List[XtcPage]:
     if len(data) < 48 or data[:4] not in {b'XTC\x00', b'XTCH'}:
         raise RuntimeError('Invalid XTC/XTCH file header.')
     count = struct.unpack_from('<H', data, 6)[0]
-    table_size = 48 + count * 16
-    if table_size > len(data):
+    index_offset = struct.unpack_from('<Q', data, 0x18)[0]
+    if index_offset < 48 or index_offset > len(data):
+        raise RuntimeError('XTC page table has an invalid offset.')
+    table_end = index_offset + count * 16
+    if table_end > len(data):
         raise RuntimeError('XTC page table is truncated.')
 
     pages = []
     for i in range(count):
-        off = 48 + i * 16
+        off = index_offset + i * 16
         page = XtcPage(
             offset=struct.unpack_from('<Q', data, off)[0],
             length=struct.unpack_from('<I', data, off + 8)[0],
@@ -3450,7 +3453,7 @@ def parse_xtc_pages(data: bytes) -> List[XtcPage]:
             height=struct.unpack_from('<H', data, off + 14)[0],
         )
         end = page.offset + page.length
-        if page.offset < table_size or end > len(data):
+        if page.offset < table_end or end > len(data):
             raise RuntimeError(f'XTCPage {i + 1} has an invalid offset or length.')
         pages.append(page)
     return pages

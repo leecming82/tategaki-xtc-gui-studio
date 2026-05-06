@@ -1032,24 +1032,84 @@ def decompress_xtcz_payload(data):
     return bytes(out)
 
 
-def build_xtc_bytes(page_blobs, w, h, output_format='xtc'):
+def _fixed_utf8_field(value, size):
+    raw = str(value or '').encode('utf-8')
+    if len(raw) >= size:
+        raw = raw[:size - 1]
+        while raw:
+            try:
+                raw.decode('utf-8')
+                break
+            except UnicodeDecodeError:
+                raw = raw[:-1]
+    return raw + b'\0' * (size - len(raw))
+
+
+def _build_xtc_metadata_block(metadata=None, chapter_count=0):
+    metadata = metadata or {}
+    create_time = int(metadata.get('create_time') or time.time())
+    create_time = max(0, min(create_time, 0xFFFFFFFF))
+    cover_page = metadata.get('cover_page', 0xFFFF)
+    if cover_page is None:
+        cover_page = 0xFFFF
+    cover_page = max(0, min(int(cover_page), 0xFFFF))
+    chapter_count = max(0, min(int(chapter_count), 0xFFFF))
+    return (
+        _fixed_utf8_field(metadata.get('title'), 128) +
+        _fixed_utf8_field(metadata.get('author'), 64) +
+        _fixed_utf8_field(metadata.get('publisher'), 32) +
+        _fixed_utf8_field(metadata.get('language'), 16) +
+        struct.pack('<I H H Q', create_time, cover_page, chapter_count, 0)
+    )
+
+
+def _build_xtc_chapter_block(chapters, page_count):
+    out = bytearray()
+    max_page = max(0, min(page_count - 1, 0xFFFF))
+    for chapter in chapters or []:
+        start_page = max(0, min(int(chapter.get('start_page', 0)), max_page))
+        end_page = chapter.get('end_page', start_page)
+        end_page = max(start_page, min(int(end_page), max_page))
+        out += (
+            _fixed_utf8_field(chapter.get('name'), 80) +
+            struct.pack('<H H I I I', start_page, end_page, 0, 0, 0)
+        )
+    return bytes(out)
+
+
+def build_xtc_bytes(page_blobs, w, h, output_format='xtc', metadata=None, chapters=None):
     cnt = len(page_blobs)
     if cnt == 0:
         raise ValueError("No conversion data was generated.")
-    idx_off = 48
-    data_off = 48 + cnt * 16
+    chapters = list(chapters or [])
+    has_metadata = bool(metadata) or bool(chapters)
+    has_chapters = bool(chapters)
+    header_size = 56 if (has_metadata or has_chapters) else 48
+    metadata_off = header_size if has_metadata else 0
+    metadata_block = _build_xtc_metadata_block(metadata, len(chapters)) if has_metadata else b''
+    chapter_off = metadata_off + len(metadata_block) if has_chapters else 0
+    chapter_block = _build_xtc_chapter_block(chapters, cnt) if has_chapters else b''
+    idx_off = header_size + len(metadata_block) + len(chapter_block)
+    data_off = idx_off + cnt * 16
     idx_table = bytearray()
     curr_off = data_off
     for b in page_blobs:
         idx_table += struct.pack("<Q I H H", curr_off, len(b), w, h)
         curr_off += len(b)
     mark = b"XTCH" if _payload_output_format(output_format) == 'xtch' else b"XTC\x00"
-    header = struct.pack("<4sHHBBBBIQQQQ", mark, 1, cnt, 1, 0, 0, 0, 0, 0, idx_off, data_off, 0)
-    return bytes(header + idx_table + b''.join(page_blobs))
+    if header_size == 56:
+        header = struct.pack(
+            "<4sHHBBBBIQQQQQ",
+            mark, 1, cnt, 1, int(has_metadata), 0, int(has_chapters), 0,
+            metadata_off, idx_off, data_off, 0, chapter_off,
+        )
+    else:
+        header = struct.pack("<4sHHBBBBIQQQQ", mark, 1, cnt, 1, 0, 0, 0, 0, 0, idx_off, data_off, 0)
+    return bytes(header + metadata_block + chapter_block + idx_table + b''.join(page_blobs))
 
 
-def build_xtc(page_blobs, out_path, w, h, output_format='xtc'):
-    raw_payload = build_xtc_bytes(page_blobs, w, h, output_format)
+def build_xtc(page_blobs, out_path, w, h, output_format='xtc', metadata=None, chapters=None):
+    raw_payload = build_xtc_bytes(page_blobs, w, h, output_format, metadata=metadata, chapters=chapters)
     data = compress_xtcz_payload(raw_payload) if _normalize_output_format(output_format) in {'xtcz', 'xtchz'} else raw_payload
     with open(out_path, "wb") as f:
         f.write(data)
@@ -1826,6 +1886,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
     ruby_font = ImageFont.truetype(str(font_path), args.ruby_size)
     rendered_pages = []
     chapter_starts = []
+    chapters = []
     bold_rules = extract_bold_rules(book)
 
     def add_page(image, is_illustration=False):
@@ -1845,6 +1906,16 @@ def process_epub(epub_path, font_path, args, output_path=None):
         if norm in {'', '.'}:
             return ''
         return norm.lstrip('/')
+
+    def extract_epub_container_metadata():
+        return {
+            'title': '',
+            'author': '',
+            'publisher': '',
+            'language': 'ja',
+        }
+
+    xtc_metadata = extract_epub_container_metadata()
 
     image_map = {
         normalize_epub_href(getattr(item, 'file_name', '')): item.get_content()
@@ -1915,6 +1986,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
         chapter_start = len(rendered_pages)
         current_doc_file_name = getattr(item, 'file_name', '')
         soup = BeautifulSoup(item.get_content(), 'html.parser')
+        chapter_title = f"Chapter {doc_index}"
         body = soup.find('body') or soup
         img = Image.new('L', (args.width, args.height), 255)
         draw = ImageDraw.Draw(img)
@@ -2200,6 +2272,11 @@ def process_epub(epub_path, font_path, args, output_path=None):
             add_page(img)
         if len(rendered_pages) > chapter_start:
             chapter_starts.append(chapter_start)
+            chapters.append({
+                'name': chapter_title,
+                'start_page': chapter_start,
+                'end_page': len(rendered_pages) - 1,
+            })
         pages_added = len(rendered_pages) - chapter_start
         _profile_log(
             args,
@@ -2220,7 +2297,10 @@ def process_epub(epub_path, font_path, args, output_path=None):
         xtg_blobs.append(page_image_to_xt_bytes(page_image, args.width, args.height, page_args))
     _profile_log(args, f"XT page encoding: {len(xtg_blobs)} page(s), {_format_elapsed(time.perf_counter() - phase_start)}")
     phase_start = time.perf_counter()
-    build_xtc(xtg_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'))
+    build_xtc(
+        xtg_blobs, out_path, args.width, args.height, getattr(args, 'output_format', 'xtc'),
+        metadata=xtc_metadata, chapters=chapters,
+    )
     _profile_log(args, f"Container write: {_format_elapsed(time.perf_counter() - phase_start)}")
     _profile_log(args, f"EPUB core total: {_format_elapsed(time.perf_counter() - epub_total_start)}")
     return out_path
