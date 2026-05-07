@@ -5,3 +5,4 @@ beautifulsoup4
 patool
 tqdm
 lz4
+pykakasi

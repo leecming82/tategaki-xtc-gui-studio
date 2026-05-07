@@ -15,6 +15,7 @@ import struct
 import tempfile
 import time
 import posixpath
+import unicodedata
 from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
 from urllib.parse import unquote
@@ -89,6 +90,14 @@ def _require_tqdm():
     return tqdm_func
 
 
+def _optional_pykakasi_converter():
+    try:
+        from pykakasi import kakasi
+    except Exception:
+        return None
+    return kakasi()
+
+
 def _optional_lz4_block():
     try:
         from lz4 import block as lz4_block
@@ -112,6 +121,122 @@ def _profile_log(args, message):
     callback = getattr(args, "profile_log", None)
     if callable(callback):
         callback(f"Timing: {message}")
+
+
+COMMON_ROMANIZED_CHAPTER_WORDS = {
+    '表紙': 'Cover',
+    '奥付': 'Colophon',
+    'プロローグ': 'Prologue',
+    'エピローグ': 'Epilogue',
+    'インタールード': 'Interlude',
+    'モノローグ': 'Monologue',
+    'プレリュード': 'Prelude',
+    'あとがき': 'Afterword',
+    '後書き': 'Afterword',
+    'まえがき': 'Preface',
+    '前書き': 'Preface',
+    '序章': 'Prologue',
+    '終章': 'Epilogue',
+    '幕間': 'Interlude',
+    '間章': 'Interlude',
+    '外伝': 'Side Story',
+    '番外編': 'Bonus Story',
+    '目次': 'Contents',
+}
+
+
+JAPANESE_TEXT_RE = re.compile(r'[\u3040-\u30ff\u3400-\u9fff0-9]*[\u3040-\u30ff\u3400-\u9fff][\u3040-\u30ff\u3400-\u9fff0-9]*')
+
+
+def normalize_chapter_metadata_text(value):
+    text = unicodedata.normalize('NFKC', str(value or ''))
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def romanize_chapter_metadata_text(value, converter=None):
+    text = normalize_chapter_metadata_text(value)
+    if not text:
+        return ''
+    for source, replacement in sorted(COMMON_ROMANIZED_CHAPTER_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
+        text = text.replace(source, replacement)
+    if converter is None:
+        return text
+
+    def romanize_match(match):
+        converted = converter.convert(match.group(0))
+        romanized_parts = []
+        for part in converted:
+            romanized_parts.append(part.get('hepburn') or part.get('orig') or '')
+        return ' '.join(piece for piece in romanized_parts if piece)
+
+    romanized = normalize_chapter_metadata_text(JAPANESE_TEXT_RE.sub(romanize_match, text))
+    return romanized or text
+
+
+def _looks_like_epub_heading_text(text):
+    text = normalize_chapter_metadata_text(text)
+    if not text or len(text) > 80:
+        return False
+    alpha_text = re.sub(r'[^A-Za-z]', '', text).upper()
+    if alpha_text in {'ACT', 'SCENE', 'PROLOGUE', 'EPILOGUE', 'INTERLUDE'}:
+        return True
+    if re.match(r'^(ACT|SCENE|CHAPTER|PART|SECTION)\s*[0-9IVXLCDM]+$', text, re.IGNORECASE):
+        return True
+    if re.match(r'^(Prologue|Epilogue|Interlude|Afterword|Preface)$', text, re.IGNORECASE):
+        return True
+    return bool(re.match(r'^[第序終幕間外番].{0,12}[章幕話編]$', text))
+
+
+def _extract_epub_paragraph_heading_title(soup, converter=None):
+    body = soup.find('body') or soup
+    headings = []
+    for node in body.find_all(['p', 'div'], recursive=True):
+        text = node.get_text(' ', strip=True)
+        title = romanize_chapter_metadata_text(text, converter=converter)
+        if not title:
+            continue
+        if _looks_like_epub_heading_text(title):
+            headings.append(title)
+            if len(headings) >= 2:
+                break
+            continue
+        if headings:
+            break
+        if len(title) > 80:
+            break
+    if not headings:
+        return ''
+    return ' '.join(headings)
+
+
+def extract_epub_chapter_title(soup, doc_index, converter=None):
+    for selector in ('h1', 'h2', 'h3', 'title'):
+        node = soup.find(selector)
+        if not node:
+            continue
+        title = romanize_chapter_metadata_text(node.get_text(' ', strip=True), converter=converter)
+        if title:
+            return title
+    title = _extract_epub_paragraph_heading_title(soup, converter=converter)
+    if title:
+        return title
+    return ''
+
+
+def infer_chapter_hierarchy_depth(title, default_depth=0):
+    normalized = normalize_chapter_metadata_text(title)
+    if re.match(r'^SCENE\s*[0-9IVXLCDM]+', normalized, re.IGNORECASE):
+        return max(int(default_depth or 0), 1)
+    return max(0, int(default_depth or 0))
+
+
+def format_chapter_hierarchy_title(title, depth):
+    title = normalize_chapter_metadata_text(title)
+    depth = infer_chapter_hierarchy_depth(title, default_depth=depth)
+    if not title or depth <= 0:
+        return title
+    return f"{'> ' * depth}{title}"
+
 
 def _natural_sort_key(path_like):
     """パスを自然順で比較するキーを返す。数値部分は整数として扱う。"""
@@ -1890,6 +2015,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
     chapter_starts = []
     chapters = []
     bold_rules = extract_bold_rules(book)
+    romanization_converter = _optional_pykakasi_converter()
 
     def add_page(image, is_illustration=False):
         rendered_pages.append((image.copy(), is_illustration))
@@ -1909,6 +2035,29 @@ def process_epub(epub_path, font_path, args, output_path=None):
             return ''
         return norm.lstrip('/')
 
+    def build_epub_toc_title_map():
+        toc_title_map = {}
+
+        def remember_entry(entry, depth):
+            href = normalize_epub_href(getattr(entry, 'href', ''))
+            title = romanize_chapter_metadata_text(getattr(entry, 'title', ''), converter=romanization_converter)
+            if href and title and (href not in toc_title_map or depth > toc_title_map[href]['depth']):
+                toc_title_map[href] = {'title': title, 'depth': depth}
+
+        def walk_toc(entries, depth=0):
+            for entry in entries or []:
+                if isinstance(entry, tuple):
+                    if not entry:
+                        continue
+                    remember_entry(entry[0], depth)
+                    if len(entry) > 1:
+                        walk_toc(entry[1], depth + 1)
+                    continue
+                remember_entry(entry, depth)
+
+        walk_toc(getattr(book, 'toc', None) or ())
+        return toc_title_map
+
     def extract_epub_container_metadata():
         return {
             'title': '',
@@ -1918,6 +2067,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
         }
 
     xtc_metadata = extract_epub_container_metadata()
+    toc_title_map = build_epub_toc_title_map()
 
     image_map = {
         normalize_epub_href(getattr(item, 'file_name', '')): item.get_content()
@@ -1988,7 +2138,14 @@ def process_epub(epub_path, font_path, args, output_path=None):
         chapter_start = len(rendered_pages)
         current_doc_file_name = getattr(item, 'file_name', '')
         soup = BeautifulSoup(item.get_content(), 'html.parser')
-        chapter_title = f"Chapter {doc_index}"
+        toc_title = toc_title_map.get(normalize_epub_href(current_doc_file_name))
+        if toc_title:
+            chapter_title = format_chapter_hierarchy_title(toc_title['title'], toc_title['depth'])
+        else:
+            chapter_title = format_chapter_hierarchy_title(
+                extract_epub_chapter_title(soup, doc_index, converter=romanization_converter),
+                0,
+            )
         body = soup.find('body') or soup
         img = Image.new('L', (args.width, args.height), 255)
         draw = ImageDraw.Draw(img)
@@ -2272,7 +2429,7 @@ def process_epub(epub_path, font_path, args, output_path=None):
         walk_xml(body)
         if has_drawn_on_page:
             add_page(img)
-        if len(rendered_pages) > chapter_start:
+        if chapter_title and len(rendered_pages) > chapter_start:
             chapter_starts.append(chapter_start)
             chapters.append({
                 'name': chapter_title,
