@@ -634,7 +634,7 @@ def _choose_vertical_layout_action(tokens, idx, curr_y, margin_t, height, margin
 
 
 def _draw_hanging_text_near_bottom(draw, original_char, pos_tuple, font, f_size, canvas_height, *,
-                                   is_bold=False, is_italic=False, extra_raise_ratio=0.0):
+                                   is_bold=False, is_italic=False, extra_raise_ratio=0.0, margin_b=0):
     curr_x, curr_y = pos_tuple
     char = TATE_REPLACE.get(original_char, original_char)
     stroke_width = 1 if is_bold else 0
@@ -659,8 +659,8 @@ def _draw_hanging_text_near_bottom(draw, original_char, pos_tuple, font, f_size,
     local_lower = max(1, int(round(f_size * lower_ratio)))
     desired_y = curr_y + base_raise + local_lower
     cell_limit_y = curr_y + max(0, f_size - glyph_h - 1)
-    page_limit_y = canvas_height - glyph_h - 1 if canvas_height else cell_limit_y
-    draw_y = max(curr_y, min(desired_y, cell_limit_y, page_limit_y))
+    page_limit_y = canvas_height - int(margin_b or 0) - glyph_h - 1 if canvas_height else cell_limit_y
+    draw_y = min(max(0, page_limit_y), max(curr_y, min(desired_y, cell_limit_y, page_limit_y)))
 
     draw_weighted_text(draw, (draw_x, draw_y), char, font, is_bold=is_bold, is_italic=is_italic)
 
@@ -671,14 +671,14 @@ def _is_lowerable_hanging_closing_bracket(token):
     return bool(token) and len(token) == 1 and token in LOWERABLE_HANGING_CLOSING_BRACKET_CHARS
 
 
-def draw_hanging_closing_bracket(draw, char, pos_tuple, font, f_size, canvas_height, is_bold=False, ruby_mode=False, is_italic=False):
+def draw_hanging_closing_bracket(draw, char, pos_tuple, font, f_size, canvas_height, is_bold=False, ruby_mode=False, is_italic=False, margin_b=0):
     _draw_hanging_text_near_bottom(
         draw, char, pos_tuple, font, f_size, canvas_height,
-        is_bold=is_bold, is_italic=is_italic, extra_raise_ratio=0.18,
+        is_bold=is_bold, is_italic=is_italic, extra_raise_ratio=0.18, margin_b=margin_b,
     )
 
 
-def draw_hanging_punctuation(draw, char, pos_tuple, font, f_size, canvas_height, is_bold=False, ruby_mode=False, is_italic=False):
+def draw_hanging_punctuation(draw, char, pos_tuple, font, f_size, canvas_height, is_bold=False, ruby_mode=False, is_italic=False, margin_b=0):
     curr_x, curr_y = pos_tuple
     glyph_char = TATE_REPLACE.get(char, char)
     glyph_img = _render_text_glyph_image(glyph_char, font, is_bold=is_bold, is_italic=is_italic)
@@ -695,9 +695,9 @@ def draw_hanging_punctuation(draw, char, pos_tuple, font, f_size, canvas_height,
     draw_x = curr_x + max(0, f_size - glyph_w - right_inset)
     draw_y = curr_y + line_step + top_inset
 
-    # 下余白は実質無視してよいが、画像最下端だけは越えない。
+    # Reserve the configured bottom margin for device reader overlays/status UI.
     if canvas_height:
-        draw_y = min(draw_y, max(0, canvas_height - glyph_h - 1))
+        draw_y = min(draw_y, max(0, canvas_height - int(margin_b or 0) - glyph_h - 1))
 
     if is_italic:
         mask = glyph_img.point(lambda p: 255 - p)
@@ -1546,12 +1546,12 @@ def generate_preview_base64(args):
                     char = seg_tokens[idx]
                     if action == 'hang_pair':
                         if _is_lowerable_hanging_closing_bracket(char):
-                            draw_hanging_closing_bracket(draw, char, (curr_x, curr_y), font, f_size, h, is_bold=is_bold)
+                            draw_hanging_closing_bracket(draw, char, (curr_x, curr_y), font, f_size, h, is_bold=is_bold, margin_b=m_b)
                         else:
                             draw_char_tate(draw, char, (curr_x, curr_y), font, f_size, is_bold=is_bold)
                         drawn_chars += 1
                         draw_hanging_punctuation(
-                            draw, seg_tokens[idx + 1], (curr_x, curr_y), font, f_size, h, is_bold=is_bold
+                            draw, seg_tokens[idx + 1], (curr_x, curr_y), font, f_size, h, is_bold=is_bold, margin_b=m_b
                         )
                         drawn_chars += 1
                         has_drawn_content = True
@@ -1876,7 +1876,7 @@ def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path
                 if _is_lowerable_hanging_closing_bracket(token_info['text']):
                     draw_hanging_closing_bracket(
                         draw, token_info['text'], (curr_x, curr_y), font, args.font_size, args.height,
-                        is_bold=token_info['bold'], is_italic=token_info['italic'],
+                        is_bold=token_info['bold'], is_italic=token_info['italic'], margin_b=args.margin_b,
                     )
                 else:
                     draw_char_tate(
@@ -1885,7 +1885,7 @@ def _render_text_blocks_to_xtc(blocks, source_path, font_path, args, output_path
                     )
                 draw_hanging_punctuation(
                     draw, tokens[idx + 1]['text'], (curr_x, curr_y), font, args.font_size, args.height,
-                    is_bold=tokens[idx + 1]['bold'], is_italic=tokens[idx + 1]['italic'],
+                    is_bold=tokens[idx + 1]['bold'], is_italic=tokens[idx + 1]['italic'], margin_b=args.margin_b,
                 )
                 has_drawn_on_page = True
                 advance_column(1)
@@ -2222,10 +2222,10 @@ def process_epub(epub_path, font_path, args, output_path=None):
                 if action == 'hang_pair':
                     ensure_room(args.font_size)
                     if _is_lowerable_hanging_closing_bracket(token):
-                        draw_hanging_closing_bracket(draw, token, (curr_x, curr_y), font, args.font_size, args.height, is_bold=is_bold)
+                        draw_hanging_closing_bracket(draw, token, (curr_x, curr_y), font, args.font_size, args.height, is_bold=is_bold, margin_b=args.margin_b)
                     else:
                         draw_char_tate(draw, token, (curr_x, curr_y), font, args.font_size, is_bold=is_bold)
-                    draw_hanging_punctuation(draw, tokens[idx + 1], (curr_x, curr_y), font, args.font_size, args.height, is_bold=is_bold)
+                    draw_hanging_punctuation(draw, tokens[idx + 1], (curr_x, curr_y), font, args.font_size, args.height, is_bold=is_bold, margin_b=args.margin_b)
                     if segment_infos is not None:
                         segment_infos.append({
                             'page_index': len(rendered_pages),
